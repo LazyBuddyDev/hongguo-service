@@ -45,6 +45,7 @@ class Fixture(Media):
     def open(self,args,browser=False):
         if not browser or args.get('series') not in ('123','124') or args.get('episode')!=1 or args.get('origin')!='http://tauri.localhost':raise ValueError('media_request_failed')
         if args.get('quality') not in ('360p','480p','720p','1080p'):raise ValueError('invalid_quality')
+        if args['series']=='124' and args['quality']!='720p':raise ValueError('quality_unavailable')
         self.close(wait=False)
         data=Path(os.environ['LAZYBUDDY_BROWSER_FIXTURE_FILE']).read_bytes()
         if not 0<len(data)<=8*1024*1024:raise ValueError('media_request_failed')
