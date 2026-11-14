@@ -1,6 +1,6 @@
 # Browser playback resources
 
-2026-11-14: the user approved maintaining this implementation in main as accepted source code. Source version0.2.5 remains an unpublished local module candidate; integrating main does not create a software release or change the signed catalog. Existing real-account/playback evidence and unresolved intermittent failures below remain separate from that source-integration approval. Native experiments are retained only in independent branches.
+2026-11-14: the user approved maintaining this implementation in main as accepted source code. Source version0.2.5 remains an unpublished local module candidate; integrating main does not create a software release or change the signed catalog. Existing real-account/playback evidence and unresolved intermittent failures below remain separate from that source-integration approval. The user subsequently requested branch cleanup: browser and native-experiment refs were removed locally/remotely, leaving main. Native experiment a1e665d was first saved and verified as a complete private local bundle, hongguo-paused-video-experiment.bundle, in the maintainer's ignored recovery directory; it is not uploaded or part of main.
 
 ## Real acceptance blocker
 
