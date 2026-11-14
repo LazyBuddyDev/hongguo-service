@@ -1,5 +1,7 @@
 # Browser playback resources
 
+2026-11-14: the user approved maintaining this implementation in main as accepted source code. Source version0.2.5 remains an unpublished local module candidate; integrating main does not create a software release or change the signed catalog. Existing real-account/playback evidence and unresolved intermittent failures below remain separate from that source-integration approval. Native experiments are retained only in independent branches.
+
 ## Real acceptance blocker
 
 Later user feedback on 2026-11-14: playback works after exiting the local proxy, although a first-attempt format error remains unexplained. A subsequent cross-series invalid_quality failure was traced to the host treating numeric available_qualities as strings and sending the selected numeric value back. The wire contract is `available_qualities: [360,720,1080]` versus request `quality: "720p"`; the fixture now matches this and rejects invalid requests. The host normalizes labels at the API boundary; its actual WebView fixture verifies two-series switching and recovery after a synthetic media error. These checks do not establish why the first real source failed, or which proxy mode caused the prior empty response. The earlier evidence below is historical, not proof that App playback is still wholly unavailable.

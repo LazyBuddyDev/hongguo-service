@@ -2,7 +2,7 @@
 
 ## LB-20261113-01 — LazyBuddy modular application
 
-Status: independent source, packaging, API and integration validated. Owner: Leager / Windows Codex. Updated: 2026-11-14. Released branch: main; current browser work: codex/lazybuddy-browser-video. Whole-product acceptance is tracked in LazyBuddyDev/LazyBuddy TASKS.md; this is the same functional requirement, not a phase task.
+Status: user approved the browser service/host source for main integration, without software publication. Owner: Leager / Windows Codex. Updated: 2026-11-14. Branch: main (this integration), source implementation79c03d9. Whole-product acceptance is tracked in LazyBuddyDev/LazyBuddy TASKS.md; remaining intermittent failures and full host migration stay open. This is the same functional requirement, not a phase task.
 
 - `[√]` Own hongguo source, API, manifests, build/package scripts, tests and CI without desktop source imports.
 - `[√]` Independently build packages and verify external host/API integration.
@@ -12,7 +12,9 @@ Status: independent source, packaging, API and integration validated. Owner: Lea
 
 Evidence: news core 7 and HTTP boundary 2 tests; Hongguo Python 80, search 5 (one real-network case ignored), decoder protocol 4 and Go resolver passed. Independent package health/install/remove/HEIC and external-host synthetic playback passed. Test only the affected layer for ordinary changes. CI runs independently in this repository.
 
-Next: check the initial commit's Actions result, complete required real-account acceptance and prepare separately authorized signed publication. Do not archive the whole requirement prematurely.
+Next: diagnose the remaining intermittent playback failures, complete full host migration and remaining real-media acceptance. Software publication requires separate authorization. Do not archive the whole requirement prematurely.
+
+Main integration approval: service79c03d9/CI43608704147 and host42ff99d/CI43608695182 passed; both browser branches can fast-forward main. Keep native experiments on separate branches. No tags, releases or signed-catalog changes are authorized in this integration. Host cleanup removed unused build/incremental caches while preserving this Git repository, SDKs, current packages/runtime, fixtures and concise evidence. Current follow-up is remaining failure diagnosis and full host migration, with any software publication separately authorized.
 
 Host UI task LB-20261114-04 logging follow-up: candidate 0.2.5 writes bounded JSONL media diagnostics under explicit LAZYBUDDY_DATA_DIR/logs (128KiB, two backups), serializing rotation with existing short process lease. Capture error category, UTC time/PID, series/episode/quality, route, redirect status/hops/hostnames and original exception file/function/line without source text; browser MediaError uses session-bound playback.report_error. No complete URL, query, cookies, keys, raw exception message or locals. Service/account error projections are logged safely, and logging failure does not change playback. 49 affected units plus 21 overlapping native/input/protocol checks pass; host frontend10/bridge4 and actual WebView expandable details + browser error file check pass. QA logs isolated and cleaned. Local package staged as0.2.5; no real-network replay or root-cause claim for the intermittent redirect yet.
 
