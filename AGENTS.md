@@ -1,5 +1,8 @@
 # hongguo service development
 
+文件归位与命名遵循[文件放置规范](https://github.com/LazyBuddyDev/LazyBuddy/blob/main/docs/file-layout.md)，路径相对本服务仓库；接口入口见[本服务API](docs/module-api.md)。
+
+
 - This repository owns its business API and build/package tests. Do not import desktop implementation or require a sibling workspace checkout. All external integration uses versioned API, staged packages and explicitly supplied host binaries.
 - Keep one TASKS.md entry for the whole LazyBuddy modularization requirement, ID LB-20261113-01; this repository's scope is part of that requirement. Operational commits and script cleanup are evidence, not new tasks. Use literal `[x]` for pending and `[√]` for done.
 - Add focused unit/contract tests for non-trivial behavior; use fixtures by default. Do not turn a local change into a full real-account acceptance run. Network/identity/permissions and synthetic/real decoding evidence remain separate.
@@ -9,28 +12,14 @@
 - Confirm own-code and third-party licenses before public distribution. Preserve upstream notices; do not invent a license or release identity. Commit/push/transfer/tag/release are separate actions within current authorization.
 
 
-## 目录用途与命名
+## 文档维护
 
-路径相对本服务仓库，按需创建；构建脚本、CI、验证驱动和文档示例使用同一约定。
+- 根README只放产品介绍与快速入口，docs/README维护专题导航，AGENTS只放长期约束，功能进度归TASKS；具体归位按文件放置规范执行，不重复维护目录表。
+- 一个主题只保留一份权威说明。宿主维护通用协议，各服务维护自己的业务API，跨仓库使用明确链接，不复制整份文档；说明当前实现，历史验证证据保留在对应TASKS条目。
+- 专题文件名使用稳定英文kebab-case，不追加日期、版本或阶段；小规模专题保持平铺。新增、合并或删除文档时同步导航、README和所有有效引用，命令路径相对所属仓库，不写开发机固定路径或凭据。
+- 一次性报告、截图和录屏放已忽略的tmp，长期结论归并专题；公开站点和签名机器端点另有用途，不作为普通文档删除或格式化，签名内容保留精确字节。
+- 纯文档修改检查链接、示例入口与已发布文件的字节完整性，不默认运行全量功能测试；构建通过、样例通过和真实验收分开报告。
 
-| 用途 | 固定位置 |
-| --- | --- |
-| Rust编译产物 | 对应Cargo工作区的默认`target/debug/`、`target/release/`，嵌套工作区遵循其自身默认路径 |
-| 验证素材 | `tmp/fixtures/<用途>/`，媒体样例为`tmp/fixtures/media/` |
-| 隔离配置、WebView用户数据 | `tmp/profiles/<验证入口>/` |
-| 临时测试数据 | `tmp/`下带用途前缀的临时目录，收尾删除 |
-| 验证报告、截图、录屏 | `tmp/verification-<用途>/` |
-| 功能包、运行时包及校验信息 | `target/packages/`，按模块或用途组织；宿主基础测试包约定为其仓库的`target/packages/base/` |
-| 维护者工具环境 | `target/tools/<工具>/`，发布工具环境统一为`target/tools/release/` |
-| 私有Go/Python工具链 | `target/toolchains/go/`、`target/toolchains/python/` |
-| 可选SDK | `target/sdks/<SDK>/`，如`gstreamer` |
-| 下载缓存、wheel和安装源 | `target/downloads/`，如`python-wheels/`、`runtime/` |
-| 构建缓存 | `target/cache/<工具>/`，如`go/`；Cargo缓存保持默认结构 |
-
-- 使用表明用途的英文小写kebab-case名称，固定用途复用稳定目录名，不按实验阶段、日期或流水号另建同类目录；并行临时实例可加唯一标识，包协议要求的不可变版本目录保留。
-- 不新建或恢复`target/qa-*`、`target/verification-*`、`target/release-tools`和混合工具链的`native-player-sdk`目录；移动目录时同步生成脚本、CI、示例与清理路径。Python虚拟环境迁移后验证解释器、入口脚本及依赖。
-- `tmp/`与`target/`保持Git忽略，报告和截图不提交；长期结论归docs或既有功能TASKS条目，历史证据路径不当作新入口。工具环境不得存私钥、认证文件或真实用户数据。
-- 构建工具归本服务管理，不依赖宿主或相邻仓库的工具链。已安装功能和运行时由宿主在同一Windows用户的`%LOCALAPPDATA%/LazyBuddy/modules/`统一管理，开发版与安装版共用；验证实例使用独立数据目录和凭据scope。
 
 ## 红果账号与媒体
 
@@ -47,8 +36,8 @@
 - 隐藏/最小化/胶囊仅暂停已建立管线，恢复不自动播放、不重新取源；加载中则取消。切页/设置释放管线，保留剧、集和真实位置，用户明确继续再载入。所有生命周期动作保留用户静音，音量为零不能改写mute；清晰度、所选倍速、音量和静音跨集/重启保留。
 - 用户主动观看或切集完成取源后播放；生命周期恢复不自动播放。自动播放、seek、EOS和临时加速绑定当前请求代数。自动连播只接受当前真实EOS，按可用列表进入下一集，末集停止，不靠时间接近片长推测。
 - 清晰度按该集实际兼容档位选择并显示实际尺寸，不能从声明或旧集推定高清成功；普通与临时倍速保持音高，seek保留既有结束位置。音频验证使用与产品相同的封装/解复用路径，测实际PCM时长和频率；音画同步不能由单项成功外推。
-- 播放控件覆盖视频，悬停/Tab显示，离开隐藏，菜单打开期间保持显示；选择、取消或离页均清理菜单状态。Fluent SVG在构建素材时预生成高分辨率PNG并缓存Handle，不为固定小图标增加运行时SVG解析依赖。控件显隐不改变视频尺寸或重建管线。
-- 播放控件保留真实Iced入口及CLI共用操作；进度拖动只预览、松手提交一次，键盘/滚轮仍提交；暂停/离页清理预览，不用旧管线零值覆盖目标位置。控件显隐、窗口缩放只改布局，不恢复账号、重取源或重建管线。
+- 客户端界面规范由[宿主维护指南](https://github.com/LazyBuddyDev/LazyBuddy/blob/main/AGENTS.md)维护，本服务不复制GUI实现约束；控件显隐不应导致服务重建媒体或重新取源。
+- 客户端播放控件和CLI使用同一服务操作；进度拖动只预览、松手提交一次，键盘/滚轮仍提交；暂停/离页清理预览，不用旧管线零值覆盖目标位置。控件显隐、窗口缩放只改布局，不恢复账号、重取源或重建管线。
 - 空格切换播放，左右跳5秒；右键按住400ms临时2倍速，松开恢复所选倍速且不再跳转，暂停时不自动播放。控件捕获和热键录入优先；失焦、切页、收起、暂停和换集清理按住状态，不能留下临时倍速。
 
 

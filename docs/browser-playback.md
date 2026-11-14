@@ -1,51 +1,60 @@
-# Browser playback resources
+# 浏览器播放资源
 
-2026-11-14: the user approved maintaining this implementation in main as accepted source code. Source version0.2.5 remains an unpublished local module candidate; integrating main does not create a software release or change the signed catalog. Existing real-account/playback evidence and unresolved intermittent failures below remain separate from that source-integration approval. The user subsequently requested branch cleanup: browser and native-experiment refs were removed locally/remotely, leaving main. Native experiment a1e665d was first saved and verified as a complete private local bundle, hongguo-paused-video-experiment.bundle, in the maintainer's ignored recovery directory; it is not uploaded or part of main.
+红果服务负责身份、目录、单集权限、清晰度选择和有界媒体准备，输出受控的压缩MP4资源；浏览器负责解复用、解码、音画同步与呈现。服务不逐帧向JavaScript传像素，不自动转码。默认功能包只依赖私有Python及包内辅助程序，不要求GStreamer。构建见[README](../README.md)，账号方法见[业务API](module-api.md)，交付状态见[TASKS](../TASKS.md)。
 
-## Real acceptance blocker
+## 私有控制协议
 
-Later user feedback on 2026-11-14: playback works after exiting the local proxy, although a first-attempt format error remains unexplained. A subsequent cross-series invalid_quality failure was traced to the host treating numeric available_qualities as strings and sending the selected numeric value back. The wire contract is `available_qualities: [360,720,1080]` versus request `quality: "720p"`; the fixture now matches this and rejects invalid requests. The host normalizes labels at the API boundary; its actual WebView fixture verifies two-series switching and recovery after a synthetic media error. These checks do not establish why the first real source failed, or which proxy mode caused the prior empty response. The earlier evidence below is historical, not proof that App playback is still wholly unavailable.
+沿用API v1 JSON Lines，只有明确用户操作及当前可见页面所需请求可运行：
 
-2026-11-14: after the user scanned into the preview, fixed series 7678157108310723646 (黑塔：从超忆症开始成神), episode 1 returns HTTP200 with zero response bytes at the App playback-model stage. Catalog succeeds; the phone App plays this episode with the same account. Reusing the saved preview device and using the configured Windows system proxy gives the same empty result. No browser resource has been created, so decoder/codec changes cannot resolve this observed failure. Network, request compatibility, App identity and permission causes remain unconfirmed; do not label this as an account denial.
-
-Source candidate 0.2.2 distinguishes `app_playback_empty_response` only for playback/HTTP200/0 bytes, without exposing response text, account data or addresses. Older generic errors remain supported. Diagnostic units are not real-playback acceptance. The staged/running 0.2.1 candidate remains unchanged until a reviewed replacement is ready.
-
-The upstream SDK [AuthProvider](https://github.com/beilunyang/openhongguo/blob/main/sdk/auth.go) currently supplies only an anonymous implementation; this adapter separately attaches the saved website cookies to allowed account endpoints. Neither a successful website login nor the anonymous SDK alone proves an authenticated App playback session. [Upstream issue 2](https://github.com/beilunyang/openhongguo/issues/2) documents a similar empty-model symptom, but does not establish the cause of this sample. The pinned [player reference](https://github.com/tsukiyo-zero/hongguoTV/blob/77a99f509b8a5c586bf6ef453147cf1003203970/kotlin-tv/core/src/main/kotlin/com/hongguotv/core/ContentRepository.kt) also records fluctuating empty responses. Its endpoint/identity fallback behavior is not adopted. Next work requires verifying the supported App identity/request contract; do not rotate devices or infer permission from the phone's success.
-
-Follow-up source review: [issue 2's controlled comparison](https://github.com/beilunyang/openhongguo/issues/2#issuecomment-6567616632) reports repeated playback using an officially initialized guest profile while an SDK-registered profile failed with the same SDK and signing code. This makes registration/initialization compatibility a concrete investigation lead, not proof about our saved preview profile or a reason to import/rotate identities. Comparing the pinned upstream 015a388 to current main found no newer registration/client/auth/playback patch to adopt. Do not misreport the SDK's anonymous AuthProvider as the confirmed cause of this failure; the transport also carries account cookies.
-
-## Resource contract
-
-Candidate 0.2.5 adds local diagnostics: set LAZYBUDDY_DATA_DIR to the owned service data directory; logs/media.log holds JSONL records, 128KiB each with two backups. A short cross-process lease serializes writes/rotation. Fields include UTC time, PID, stage, series/episode/requested quality, route, HTTP redirect status/hop, source and target hostname, exception type and stack file/function/line. Never log complete URLs, query strings, credentials, keys, raw exception messages, locals or source-code text. Failure to write logs must not change playback. Informational redirect hops have no stack; failures retain safe call locations. The host provides expandable bottom details and a logs-folder action, while codes remain only fast categories.
-
-`playback.report_error {session, code}` records browser MediaError1–4 without rebuilding the media resource; invalid/stale sessions and invalid codes are rejected. Input preparation, streaming, API and account failures also write safe diagnostics. Synthetic fixtures have a separate data directory and are not evidence of real network success. No cause has yet been established for the user's intermittent redirect failure; the next occurrence should be investigated with these logs instead of increasing the redirect/domain budget.
-
-Candidate 0.2.4 keeps redirect acceptance unchanged and exposes distinct safe codes: media_redirect_https_required, media_redirect_target_rejected, media_redirect_missing_location and media_redirect_limit. Old media_redirect_rejected remains accepted for compatibility. Direct and proxy paths use the same categories; no automatic source retry or domain expansion. The user reports intermittent failures while opening random series; a root cause has not been reproduced. Host error context names the current series/episode, and its central retry control reconnects only on explicit user action. Synthetic initial-preparation failure and browser format-error recovery pass independently of real-network diagnosis.
-
-Candidate 0.2.3 aligns helper proxy routing with urllib: service startup forwards selected http/https/all/no proxy settings to its own child environment, retaining explicit environment overrides. The external host's persisted direct setting clears proxy addresses and sets NO_PROXY=* only for this service; disabling it starts a fresh service following system/environment settings. This changes no machine/Clash configuration and cannot bypass a TUN route. Network tests cover system-proxy forwarding and direct mode never reading Windows proxy registry settings. Real playback with Clash still active remains manual acceptance.
-
-The 0.2.1 candidate exposes compressed MP4 resources instead of requiring a native decoder. The service retains identity checks, episode permissions, quality selection and bounded offset-preserving Range preparation. The browser performs demuxing, decoding, AV synchronization and rendering. `media-runtime` is absent from the feature's required dependencies and default package build; Python and the bundled Go/search helpers remain required. Existing signed 0.1.0 catalog entries are unchanged. Do not deliver this candidate to the old Iced media consumer before its host migration.
-
-The control transport remains version-1 JSON Lines on the private child pipes:
-
-| Method | Arguments | Result |
+| 方法 | 参数 | 结果 |
 | --- | --- | --- |
-| `playback.open` | `series` string, `episode` integer, optional `quality`, explicit `origin` such as `http://tauri.localhost` | Starts preparation; returns a session generation and loading state |
-| `playback.status` | none | Current prepared/loading/error state; episode list, qualities, source dimensions and resource when ready |
-| `playback.suspend` / `playback.resume` | `session` integer | Stops/allows resource reads; loading preparation is cancelled on suspend |
-| `playback.checkpoint` | `session`, decoded `position` and `duration` seconds, optional boolean `final` | Saves the same account-bound progress transaction; final requests a flush |
-| `playback.close` | `session` | Releases the input process and resource, and finalizes existing progress work |
+| `playback.open` | 字符串`series`、整数`episode`、可选字符串`quality`、明确`origin` | 新会话代数与loading状态 |
+| `playback.status` | 无 | 当前loading/prepared/error、目录与资源 |
+| `playback.report_error` | 整数`session`、浏览器媒体错误`code`（1–4） | 记录所属会话错误 |
+| `playback.suspend/resume` | 整数`session` | 停止/允许资源读取，加载中suspend取消准备 |
+| `playback.checkpoint` | `session`、秒数`position/duration`、可选布尔`final` | 保存真实观看断点，final请求提交 |
+| `playback.close` | 整数`session` | 释放资源与输入进程，收尾已有进度事务 |
 
-Ready responses contain `prepared: true`, `resource: {url, mime: "video/mp4"}`, `session`, `suspended` and sanitized error/progress fields. A resource URL identifies a random capability on 127.0.0.1; it is not the upstream signed URL. Do not persist or log it. The browser must use CORS mode, for example `<video crossorigin="anonymous">`. Each resource permits only the origin supplied to open and its exact Host/path. GET, HEAD, single Range and OPTIONS are supported. Private service-only POST controls suspend/resume; requests with browser Origin/Sec-Fetch headers cannot use that control. No arbitrary URL fetching endpoint is exposed.
+准备完成时返回`prepared: true`、`resource: {url, mime: "video/mp4"}`、`session`、`suspended`，以及脱敏错误、进度、分集与清晰度字段。`available_qualities`是数字数组（如`[360,720,1080]`），请求`quality`使用带p字符串（如`"720p"`），客户端在边界转换，不把旧集档位照搬给新集。档位来自当前集实际兼容结果。
 
-An accepted open is not proof that a browser decoded a frame. Loading status is polled only while the content page is active. Browser `loadedmetadata`, actual dimensions, frame callback `mediaTime`, errors and EOS own playback feedback. Do not derive presented media time from the native IPC clock or from a requested seek target. Unsupported codecs are errors; no automatic CPU transcoding is introduced.
+接受open不代表浏览器已解码。仅当前可见页面轮询准备状态；用`loadedmetadata`、实际尺寸、帧回调`mediaTime`、媒体error与真实EOS反馈播放。请求seek目标、滑块预览或服务声明时长不能代替已观看帧时间。
 
-On hide, pause and unload the browser source, then suspend the resource. A late upstream read is bounded by the existing timeout; it must not populate the cancelled generation's cache or trigger subsequent reads. Resume the same resource and position while paused. On page/settings departure or exit, close the session/process tree. Controls/checkpoints require the matching session generation, randomized across process starts. The browser reports decoded watched frames rather than slider previews; identical final checkpoints do not repeat a flush.
+## 本地媒体资源
 
-Version 0.2.1 adds `credential_scopes` to health capabilities. `LAZYBUDDY_CREDENTIAL_SCOPE` optionally isolates Windows credential and device targets (1–48 lowercase letters/digits/hyphens); unset keeps the production namespace. The external preview host requires this version and uses `shell-preview`, separate local data, explicit real playback/search/favorites flags and disabled cloud progress uploads. QR login uses the existing account API; hosts render the returned PNG, poll only while the QR view is active, stop that process on departure, and distinguish cancel from deleting saved credentials. The preview now connects actual search/favorite items and episode IDs instead of a fixed fixture ID. Real QR, upstream permissions and programme playback remain manual acceptance items.
+URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不能持久化、输出到公开状态或日志。只允许open明确传入的Origin、精确Host及固定路径。浏览器使用CORS模式，例如`<video crossorigin="anonymous">`。
 
-Focused validation for this integration: 33 credential/media/browser/protocol units pass, without real credential access. The actual WebView fixture covers QR display/cancel, polling stopped in global settings, login/search/playback/logout and paused hide/resume with the selected 1.5 rate. These are synthetic account responses, not real-network evidence.
+支持GET、HEAD、单Range与OPTIONS；服务私有POST控制不能由携带浏览器Origin/Sec-Fetch的请求调用。资源只能读取当前固定媒体，不提供任意URL代理。上游签名、Cookie、密钥与明文媒体不落盘；资源读取、响应、缓存及尺寸均受界限约束。
 
-Validation on 2026-11-14: focused browser/Range/input/media/protocol/selection modules pass (37 tests). An external, explicitly staged synthetic fixture package with only Python dependency drives the real WebView: H.264 and H.265/AAC decode, paused seek presents mediaTime 3.1s, hide unloads src and server rejects reads, resume restores 3.1s without playing, settings invalidate the old resource, normal exit completes. No GStreamer decoder is spawned. AAC is muted; real red-fruit permissions, processed real streams, audio quality and programme AV sync are not established by this fixture.
+## 生命周期与进度
 
-The fixture belongs to this repository and is never shipped as a release entry. After independently building packages, stage it with `python -B scripts/verify/stage-browser-fixture.py --runtime-packages target/packages --output target/packages-browser-fixture` (select the actual package output directory). Point the external host at that package directory and set `LAZYBUDDY_BROWSER_FIXTURE_FILE` to an explicitly generated synthetic MP4 of at least four seconds and at most 8MB. The production service entry remains `main.py`; no account/URL fixture override is added there. Code 554ab6a passed CI43587786151; the host prototype e0e950d passed CI43587778472. These checks are independent from real-account acceptance.
+隐藏时先暂停并卸载浏览器src，再suspend资源读取。已有上游读取最多等现有有界超时，取消代数下不得填新缓存或派生后续读取。恢复同一资源和实际位置但保持暂停，用户明确播放才继续。
+
+切根页面、打开设置或退出时close所属会话与进程树。session跨进程启动随机化，checkpoint、close、suspend和resume核对代数；旧页面不能关闭新播放器或覆盖其进度。相同最终检查点不重复提交云端。生命周期动作保留用户倍速、音量与静音。
+
+`LAZYBUDDY_CREDENTIAL_SCOPE`可隔离Windows凭据和设备目标，允许1–48个小写字母、数字或连字符；未设置时使用服务默认生产命名空间。真实宿主的数据目录与scope由宿主管理，不能因仓库整理复制凭据。测试使用显式独立目录及scope，不复用真实账号。
+
+## 网络与故障诊断
+
+服务启动时将所选http/https/all/no代理设置转给自身辅助进程，使Go与Python路由一致，保留显式环境覆盖。宿主「是否直连」清除本服务代理并设置`NO_PROXY=*`，关闭后重建服务跟随系统/环境设置；不修改机器或Clash配置，也不能据此声称绕过TUN路由。
+
+取源前检查已验证端点，CDN逐跳校验HTTPS及允许来源，不附账号Cookie或网页Referer。错误细分为`media_redirect_https_required`、`media_redirect_target_rejected`、`media_redirect_missing_location`、`media_redirect_limit`；旧`media_redirect_rejected`仍可显示。不能为偶发故障放宽来源、增加自动重试或更换身份。手动重试由当前用户明确发起，保留当前剧与集的错误上下文。
+
+`app_playback_empty_response`只表示播放模型阶段HTTP200但正文为空，此时尚无浏览器资源，不能靠更换解码器解决。目录成功、手机可播或网站已登录均不能证明桌面App取源权限；网络、身份和请求兼容原因需日志证据，不猜测为账号拒绝。偶发真实网络问题的当前结论与下一步只在TASKS维护。
+
+设置`LAZYBUDDY_DATA_DIR`后，`logs/media.log`保存JSONL，单份128KiB、两个轮转备份，跨进程短锁保护。记录UTC时间、PID、阶段、剧/集、清晰度、direct/system、HTTP状态、跳转序号、来源/目标主机、异常类型和有限栈文件/函数/行号。错误码供界面快速定位，底部显示可理解的上下文；准确排查以脱敏日志为准。
+
+不写完整URL、查询参数、响应正文、原始异常文本、局部变量、账号材料或媒体能力。记录失败不能破坏播放，日志不是新网络请求或自动重连依据。
+
+## 定向验证
+
+单位测试覆盖协议、会话、Range、取源和质量选择；具体入口由`scripts/check-changes.py`选择。不会读取真实凭据或访问真实节目。
+
+浏览器合成fixture归本服务，独立生成后交给明确指定的外部宿主，不导入宿主源码：
+
+```powershell
+python -B scripts/verify/stage-browser-fixture.py --runtime-packages target/packages --output target/packages/browser-fixture
+```
+
+输入目录须含已独立生成并解包的`python-runtime/`运行时包；输出须是未存在的暂存目录。外部宿主显式设置`LAZYBUDDY_BROWSER_FIXTURE_FILE`指向自制4秒以上、最多8MB的MP4，目录按统一规范放`tmp/fixtures/media`，隔离配置和报告也归tmp。fixture不能发布为正式模块，也不能给生产入口增加任意账号或URL覆盖。
+
+实际WebView验证应分开确认二维码取消、收藏反馈、真实帧推进/seek、隐藏停止读取、恢复暂停、切页失效旧资源及退出收尾。合成H.264/H.265/AAC成功不代表上游节目权限、真实音频质量或节目音画同步，单元成功也不替代这些验收。

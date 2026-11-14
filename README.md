@@ -8,7 +8,7 @@ python -m venv .venv
 .venv/Scripts/python.exe -B scripts/check-changes.py --base origin/main
 ```
 
-For source runs set PYTHONPATH=src and run `python -m lazybuddy_hongguo`; health does not load an account or decoder. See docs/module-api.md for business fields and [browser playback](docs/browser-playback.md) for the resource-session API, connection routing and diagnostics in source version 0.2.5. The user approved integrating this code into main; this does not publish a software release or update the signed module catalog. The browser handles decoding/rendering; the service retains account, permission and bounded media preparation.
+For source runs set PYTHONPATH=src and run `python -m lazybuddy_hongguo`; health does not load an account or decoder. See [documentation](docs/README.md) and [module API](docs/module-api.md) for business fields and [browser playback](docs/browser-playback.md) for the resource-session API, connection routing and diagnostics in source version 0.2.5. The user approved integrating this code into main; this does not publish a software release or update the signed module catalog. The browser handles decoding/rendering; the service retains account, permission and bounded media preparation.
 
 Build feature/runtime packages independently:
 
