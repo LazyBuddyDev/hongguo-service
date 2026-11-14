@@ -9,8 +9,12 @@ def allowed(url):
     except ValueError:return False
 class Redirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,req,fp,code,msg,headers,url):
-        if not allowed(url):raise ValueError('media_redirect_rejected')
+        check_redirect(url)
         return super().redirect_request(req,fp,code,msg,headers,url)
+
+def check_redirect(url):
+    if not allowed(url):
+        raise ValueError('media_redirect_https_required' if url.lower().startswith('http:') else 'media_redirect_target_rejected')
 
 class Source:
     BLOCK=256*1024
@@ -55,6 +59,8 @@ class Source:
         try:return self.fetch_range(start,end)
         except urllib.error.HTTPError as error:
             if error.code in (401,403):self.denied=True;raise ValueError('media_access_denied') from None
+            if error.code in (301,302,303,307,308):
+                raise ValueError('media_redirect_limit' if error.headers.get('Location') else 'media_redirect_missing_location') from None
             raise ValueError('media_http_error') from None
         except (urllib.error.URLError,OSError,http.client.HTTPException):raise ValueError('media_network_error') from None
     def fetch_range(self,start,end):
@@ -74,7 +80,7 @@ class Source:
         if self.proxy:return self.opener.open(request,timeout=8)
         url=request.full_url
         for _ in range(6):
-            if not allowed(url):raise ValueError('media_redirect_rejected')
+            check_redirect(url)
             parsed=urllib.parse.urlsplit(url);origin=(parsed.hostname,parsed.port or 443)
             reused=self.connection is not None and self.origin==origin and self.connection.sock is not None
             if self.connection is None or self.origin!=origin:
@@ -92,13 +98,13 @@ class Source:
                 raise urllib.error.URLError('media_transport_failed') from None
             if response.status in (301,302,303,307,308):
                 location=response.headers.get('Location');response.close();self.connection.close();self.connection=None
-                if not location:raise ValueError('media_redirect_rejected')
+                if not location:raise ValueError('media_redirect_missing_location')
                 url=urllib.parse.urljoin(url,location);continue
             if response.status>=400:
                 status,headers=response.status,response.headers;response.close();self.connection.close();self.connection=None
                 raise urllib.error.HTTPError(url,status,'media_rejected',headers,None)
             return response
-        raise ValueError('media_redirect_rejected')
+        raise ValueError('media_redirect_limit')
     def track(self,start,end,mdats):
         data=self.moov
         def child(start,end,typ):return only(list(boxes(data,start,end)),typ)

@@ -1,5 +1,6 @@
 """Stable failure categories; never publish exception text, credentials or addresses."""
 MEDIA_CODES={
+    'media_redirect_https_required','media_redirect_target_rejected','media_redirect_missing_location','media_redirect_limit',
     'invalid_series','invalid_episode','invalid_quality','saved_credentials_missing','saved_session_verification_failed',
     'app_access_denied','app_media_unavailable','app_registration_unavailable','app_catalog_unavailable',
     'app_playback_unavailable','app_playback_empty_response','app_source_unavailable','app_source_timeout','app_rate_limited','app_source_network_error',

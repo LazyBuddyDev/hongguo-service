@@ -41,12 +41,15 @@ class Source:
             yield self.data[at:min(at+256*1024,end+1)]
 
 class Fixture(Media):
-    def __init__(self,account):super().__init__(account);self.server=self.worker=None
+    def __init__(self,account):super().__init__(account);self.server=self.worker=None;self.second_attempts=0
     def open(self,args,browser=False):
         if not browser or args.get('series') not in ('123','124') or args.get('episode')!=1 or args.get('origin')!='http://tauri.localhost':raise ValueError('media_request_failed')
         if args.get('quality') not in ('360p','480p','720p','1080p'):raise ValueError('invalid_quality')
         if args['series']=='124' and args['quality']!='720p':raise ValueError('quality_unavailable')
         self.close(wait=False)
+        if args['series']=='124':
+            self.second_attempts+=1
+            if self.second_attempts==1:raise ValueError('media_redirect_limit')
         data=Path(os.environ['LAZYBUDDY_BROWSER_FIXTURE_FILE']).read_bytes()
         if not 0<len(data)<=8*1024*1024:raise ValueError('media_request_failed')
         self.server=Server(Source(data),origin=args['origin']);self.worker=threading.Thread(target=self.server.serve);self.worker.start()

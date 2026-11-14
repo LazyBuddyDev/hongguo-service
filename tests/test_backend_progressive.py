@@ -82,8 +82,35 @@ class Tests(unittest.TestCase):
         source=m.Source.__new__(m.Source);source.url='https://fixture.qznovelvod.com/a';source.connection=None;source.origin=None;source.proxy=False;source.tls=None
         reply=Mock(status=302,headers={'Location':'https://untrusted.invalid/a'});connection=Mock();connection.getresponse.return_value=reply
         with patch.object(m.http.client,'HTTPSConnection',return_value=connection) as factory:
-            with self.assertRaisesRegex(ValueError,'media_redirect_rejected'):source.open_range(m.urllib.request.Request(source.url))
+            with self.assertRaisesRegex(ValueError,'media_redirect_target_rejected'):source.open_range(m.urllib.request.Request(source.url))
             self.assertEqual(factory.call_count,1);self.assertEqual(connection.request.call_count,1)
+    def test_redirect_failures_keep_distinct_safe_codes(self):
+        from lazybuddy_hongguo.errors import code
+        for target,expected in [('http://fixture.qznovelvod.com/a','media_redirect_https_required'),('https://example.invalid/secret?token=fixture','media_redirect_target_rejected')]:
+            with self.assertRaises(ValueError) as error:m.check_redirect(target)
+            self.assertEqual(code(error.exception),expected)
+            self.assertNotIn('token',str(error.exception))
+        for location,expected in [(None,'media_redirect_missing_location'),('/a','media_redirect_limit')]:
+            source=m.Source.__new__(m.Source);source.url='https://fixture.qznovelvod.com/a';source.connection=None;source.origin=None;source.proxy=False;source.tls=None
+            reply=Mock(status=302,headers={} if location is None else {'Location':location});connection=Mock();connection.getresponse.return_value=reply
+            with patch.object(m.http.client,'HTTPSConnection',return_value=connection):
+                with self.assertRaises(ValueError) as error:source.open_range(m.urllib.request.Request(source.url))
+                self.assertEqual(code(error.exception),expected)
+                self.assertLessEqual(connection.request.call_count,6)
+    def test_approved_redirect_preserves_range_and_reaches_media(self):
+        source=m.Source.__new__(m.Source);source.url='https://fixture.qznovelvod.com/a';source.connection=None;source.origin=None;source.proxy=False;source.tls=None
+        redirect=Mock(status=302,headers={'Location':'https://other.qznovelvod.com/b'});media=Mock(status=206)
+        first=Mock();first.getresponse.return_value=redirect;second=Mock();second.getresponse.return_value=media
+        with patch.object(m.http.client,'HTTPSConnection',side_effect=[first,second]):
+            result=source.open_range(m.urllib.request.Request(source.url,headers={'Range':'bytes=0-63'}))
+            self.assertIs(result,media)
+            self.assertEqual(second.request.call_args.kwargs['headers']['Range'],'bytes=0-63')
+    def test_proxy_redirect_errors_have_same_categories_without_retry(self):
+        for headers,expected in [({},'media_redirect_missing_location'),({'Location':'https://fixture.qznovelvod.com/a'},'media_redirect_limit')]:
+            source=m.Source.__new__(m.Source);source.denied=False
+            with patch.object(source,'fetch_range',side_effect=urllib.error.HTTPError('https://fixture.qznovelvod.com/a',302,'fixture',headers,None)) as fetch:
+                with self.assertRaisesRegex(ValueError,expected):source.fetch(0,1)
+                self.assertEqual(fetch.call_count,1)
     def test_cancelled_range_stops_before_fetching_another_block(self):
         data,_,key,_=fixture(padding=4*1024*1024);source=FakeSource(data,key);cancelled=False
         reader=source.read(0,len(data)-1,lambda:cancelled)
