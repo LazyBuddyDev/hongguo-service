@@ -100,6 +100,23 @@ class Tests(unittest.TestCase):
                     media.resolve('12345', 222, '720p', dict(owner=owner, profile=PROFILE), passport)
                 self.assertEqual(json.loads(run.call_args.kwargs['input'])['profile'], expected)
 
+    def test_empty_player_response_is_distinct_from_access_denial(self):
+        import json
+        from unittest.mock import Mock
+        from lazybuddy_hongguo.backend import app_input as media
+        from lazybuddy_hongguo.errors import code
+        passport=Mock();passport.restore.return_value.confirm.return_value='123'
+        for error,diagnostic,expected in [
+            ('app_playback_unavailable',dict(stage='playback',http_status=200,body_bytes=0),'app_playback_empty_response'),
+            ('app_playback_unavailable',dict(stage='playback',http_status=200,body_bytes=20),'app_playback_unavailable'),
+            ('app_access_denied',dict(stage='playback',http_status=403,body_bytes=0),'app_access_denied'),
+        ]:
+            reply=Mock(returncode=1,stdout=json.dumps(dict(ok=False,error=error,diagnostic=diagnostic)).encode())
+            with patch.object(c,'read_device',return_value=PROFILE),patch.object(c,'remember_device'),patch.object(media.pathlib.Path,'is_file',return_value=True),patch.object(media.subprocess,'run',return_value=reply) as run:
+                with self.assertRaises(ValueError) as raised:media.resolve('12345',1,'720p',{},passport)
+                self.assertEqual(code(raised.exception),expected)
+                self.assertEqual(run.call_count,1)
+
     def test_media_and_identity_overlap_without_skipping_final_identity_check(self):
         import json, threading
         from unittest.mock import Mock

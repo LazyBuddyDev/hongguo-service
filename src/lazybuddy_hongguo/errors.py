@@ -2,7 +2,7 @@
 MEDIA_CODES={
     'invalid_series','invalid_episode','invalid_quality','saved_credentials_missing','saved_session_verification_failed',
     'app_access_denied','app_media_unavailable','app_registration_unavailable','app_catalog_unavailable',
-    'app_playback_unavailable','app_source_unavailable','app_source_timeout','app_rate_limited','app_source_network_error',
+    'app_playback_unavailable','app_playback_empty_response','app_source_unavailable','app_source_timeout','app_rate_limited','app_source_network_error',
     'episode_unavailable','quality_unavailable','quality_resolution_not_met','media_access_denied','media_redirect_rejected',
     'range_not_supported','media_size_changed','resolver_session_too_large','playback_episode_mismatch','media_network_error',
     'media_http_error','metadata_limit','range_limit','invalid_content_range','incomplete_media_range','unsupported_media_codec',

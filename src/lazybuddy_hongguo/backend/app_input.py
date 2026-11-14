@@ -30,6 +30,9 @@ def resolve(series,episode,quality,session,passport,on_error=None,origin=None):
     value=json.loads(process.stdout)
     if process.returncode or value.get('ok') is not True:
         code=value.get('error')
+        diagnostic=value.get('diagnostic')
+        if code=='app_playback_unavailable' and isinstance(diagnostic,dict) and diagnostic.get('stage')=='playback' and diagnostic.get('http_status')==200 and diagnostic.get('body_bytes')==0:
+            raise ValueError('app_playback_empty_response')
         raise ValueError(code if code in {'app_access_denied','app_media_unavailable','app_registration_unavailable','app_catalog_unavailable','app_playback_unavailable','app_source_unavailable','episode_unavailable','quality_unavailable','unsupported_wrapped_material','unsupported_media_layout','media_source_rejected','playback_episode_mismatch','app_rate_limited','app_source_network_error'} else 'app_source_unavailable')
     resolve_ms=round((time.monotonic()-began)*1000)
     try:key=bytes.fromhex(value['key']) if value['key'] else None

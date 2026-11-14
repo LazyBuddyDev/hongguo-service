@@ -1,5 +1,15 @@
 # Browser playback resources
 
+## Real acceptance blocker
+
+2026-11-14: after the user scanned into the preview, fixed series 7678157108310723646 (黑塔：从超忆症开始成神), episode 1 returns HTTP200 with zero response bytes at the App playback-model stage. Catalog succeeds; the phone App plays this episode with the same account. Reusing the saved preview device and using the configured Windows system proxy gives the same empty result. No browser resource has been created, so decoder/codec changes cannot resolve this observed failure. Network, request compatibility, App identity and permission causes remain unconfirmed; do not label this as an account denial.
+
+Source candidate 0.2.2 distinguishes `app_playback_empty_response` only for playback/HTTP200/0 bytes, without exposing response text, account data or addresses. Older generic errors remain supported. Diagnostic units are not real-playback acceptance. The staged/running 0.2.1 candidate remains unchanged until a reviewed replacement is ready.
+
+The upstream SDK [AuthProvider](https://github.com/beilunyang/openhongguo/blob/main/sdk/auth.go) currently supplies only an anonymous implementation; this adapter separately attaches the saved website cookies to allowed account endpoints. Neither a successful website login nor the anonymous SDK alone proves an authenticated App playback session. [Upstream issue 2](https://github.com/beilunyang/openhongguo/issues/2) documents a similar empty-model symptom, but does not establish the cause of this sample. The pinned [player reference](https://github.com/tsukiyo-zero/hongguoTV/blob/77a99f509b8a5c586bf6ef453147cf1003203970/kotlin-tv/core/src/main/kotlin/com/hongguotv/core/ContentRepository.kt) also records fluctuating empty responses. Its endpoint/identity fallback behavior is not adopted. Next work requires verifying the supported App identity/request contract; do not rotate devices or infer permission from the phone's success.
+
+## Resource contract
+
 The 0.2.1 candidate exposes compressed MP4 resources instead of requiring a native decoder. The service retains identity checks, episode permissions, quality selection and bounded offset-preserving Range preparation. The browser performs demuxing, decoding, AV synchronization and rendering. `media-runtime` is absent from the feature's required dependencies and default package build; Python and the bundled Go/search helpers remain required. Existing signed 0.1.0 catalog entries are unchanged. Do not deliver this candidate to the old Iced media consumer before its host migration.
 
 The control transport remains version-1 JSON Lines on the private child pipes:
