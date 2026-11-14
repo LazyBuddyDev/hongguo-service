@@ -6,6 +6,7 @@
 - Prefer CLI, simple existing code and standard libraries. Research difficult integration against official upstream examples before adding abstractions. Keep UI out of the service, and preserve validation at credentials, network, IPC and local-file boundaries.
 - Credentials, device identities, signed URLs and media keys never enter commits, command arguments or public errors. Explicit user authorization is required for real account writes. Do not infer rights from a successful login or one episode.
 - Use private dependencies and ignored target/tmp output. Clean verified obsolete artifacts promptly, preserving SDKs, live instances, source and unpushed Git history. Do not run a blanket clean against a shared SDK.
+- Keep private Go/Python in target/toolchains, optional SDKs in target/sdks, downloaded wheels/installers in target/downloads, and build caches in target/cache. Do not mix them into a shared native-player-sdk directory or load a host checkout's toolchain implicitly. Verification reports, screenshots and recordings belong in ignored tmp.
 - Confirm own-code and third-party licenses before public distribution. Preserve upstream notices; do not invent a license or release identity. Commit/push/transfer/tag/release are separate actions within current authorization.
 
 ## 红果账号与媒体

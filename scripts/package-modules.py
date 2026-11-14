@@ -11,9 +11,9 @@ import tomllib
 import zipfile
 from package_support import notices
 from media_runtime_files import stage as stage_media_files
+from toolchain_paths import GO, PYTHON, WHEELS, GSTREAMER
 
 ROOT=Path(__file__).resolve().parents[1]
-SDK=Path(os.environ.get('LAZYBUDDY_SDK_DIR',str(ROOT/'target/native-player-sdk')))
 
 
 def copy_files(source,destination,pattern):
@@ -26,8 +26,8 @@ def stage(identifier,destination,profile):
     destination.mkdir(parents=True,exist_ok=False)
     shutil.copyfile(ROOT/'module.json' if identifier=='hongguo' else ROOT/'contracts'/identifier/'module.json',destination/'module.json')
     if identifier=='python-runtime':
-        if not (SDK/'lazybuddy-python/python.exe').is_file():raise ValueError('prepare private Python runtime first')
-        shutil.copytree(SDK/'lazybuddy-python',destination/'bin')
+        if not (PYTHON/'python.exe').is_file():raise ValueError('prepare private Python runtime first')
+        shutil.copytree(PYTHON,destination/'bin')
     elif identifier=='hongguo':
         service=destination/'service'
         shutil.copytree(ROOT/'src/lazybuddy_hongguo',service/'lazybuddy_hongguo',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
@@ -36,21 +36,21 @@ def stage(identifier,destination,profile):
         runtime.mkdir()
         for source in [ROOT/'target/hongguo-app-resolver.exe',ROOT/'search/target'/profile/'lazybuddy-hongguo-search.exe']:
             shutil.copyfile(source,runtime/source.name)
-        wheels=list((SDK/'lazybuddy-python-wheels').glob('*.whl'))
+        wheels=list(WHEELS.glob('*.whl'))
         if len(wheels)!=5:raise ValueError('prepare the five pinned Python dependency wheels first')
         packages=service/'packages'
         subprocess.run([sys.executable,'-m','pip','install','--quiet','--disable-pip-version-check','--no-cache-dir',
             '--no-compile','--no-index','--no-deps','--only-binary=:all:','--python-version','3.13',
             '--implementation','cp','--abi','cp313','--platform','win_amd64','--target',str(packages),
-            '--find-links',str(SDK/'lazybuddy-python-wheels'),
+            '--find-links',str(WHEELS),
             *tomllib.loads((ROOT/'pyproject.toml').read_text(encoding='utf-8'))['project']['dependencies']],check=True)
         shutil.copyfile(ROOT/'vendor/openhongguo/LICENSE',destination/'openhongguo-LICENSE')
         shutil.copyfile(ROOT/'vendor/openhongguo/BRIEFDOCK.md',destination/'openhongguo-NOTICE.md')
-        shutil.copyfile(SDK/'go/LICENSE',destination/'Go-LICENSE')
+        shutil.copyfile(GO/'LICENSE',destination/'Go-LICENSE')
     elif identifier=='media-runtime':
         (destination/'service').mkdir()
         shutil.copyfile(ROOT/'runtimes/media/lazybuddy_media.py',destination/'service/lazybuddy_media.py')
-        gst=SDK/'PFiles64/gstreamer/1.0/msvc_x86_64'
+        gst=GSTREAMER
         if not (gst/'bin/gstreamer-1.0-0.dll').is_file():raise ValueError('prepare verified GStreamer runtime first')
         vswhere=Path(os.environ['ProgramFiles(x86)'])/'Microsoft Visual Studio/Installer/vswhere.exe'
         installation=subprocess.check_output([str(vswhere),'-latest','-products','*','-property','installationPath'],text=True).strip()

@@ -20,7 +20,8 @@ ROOT=Path(__file__).resolve().parents[2]
 HOST_DIR=Path(os.environ['LAZYBUDDY_HOST_DIR']).resolve()
 CLI=HOST_DIR/'lazybuddy-cli.exe'
 HOST=HOST_DIR/'lazybuddy.exe'
-GST=Path(os.environ.get('LAZYBUDDY_SDK_DIR',str(ROOT/'target/native-player-sdk')))/'PFiles64/gstreamer/1.0/msvc_x86_64'
+sys.path.insert(0,str(ROOT/'scripts'))
+from toolchain_paths import GSTREAMER as GST
 STAGED=Path(os.environ.get('LAZYBUDDY_PACKAGES_DIR',str(ROOT/'target/packages-dev')))
 before=user32.GetForegroundWindow()
 with tempfile.TemporaryDirectory(prefix='qa-host-media-',dir=ROOT/'target') as temporary:

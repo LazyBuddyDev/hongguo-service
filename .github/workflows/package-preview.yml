@@ -31,7 +31,6 @@ jobs:
         run: |
           cargo build --release --locked --manifest-path search/Cargo.toml
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & scripts/prepare-media-sdk.ps1
           & scripts/build-hongguo-resolver.ps1
           python -B scripts/prepare-module-runtimes.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

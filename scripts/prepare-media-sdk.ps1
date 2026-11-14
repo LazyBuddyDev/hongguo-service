@@ -1,9 +1,9 @@
-param([string] $SdkDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'target/native-player-sdk'))
+param([string] $SdkDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'target/sdks/gstreamer'))
 $ErrorActionPreference = 'Stop'
-if (-not $PSBoundParameters.ContainsKey('SdkDirectory') -and $env:LAZYBUDDY_SDK_DIR) { $SdkDirectory = $env:LAZYBUDDY_SDK_DIR }
+if (-not $PSBoundParameters.ContainsKey('SdkDirectory') -and $env:LAZYBUDDY_GSTREAMER_SDK_DIR) { $SdkDirectory = $env:LAZYBUDDY_GSTREAMER_SDK_DIR }
 $repo = Split-Path -Parent $PSScriptRoot
 $sdk = [IO.Path]::GetFullPath($SdkDirectory)
-$downloads = Join-Path $repo 'target/release-runtime-downloads'
+$downloads = Join-Path $repo 'target/downloads/runtime'
 $gst = Join-Path $sdk 'PFiles64/gstreamer/1.0/msvc_x86_64'
 if ($sdk -eq [IO.Path]::GetFullPath($downloads)) { throw 'MSI source and administrative image must be separate.' }
 New-Item -ItemType Directory -Force $sdk,$downloads | Out-Null

@@ -16,7 +16,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 HOST_DIR=Path(os.environ['LAZYBUDDY_HOST_DIR']).resolve()
-GST = Path(os.environ.get('LAZYBUDDY_SDK_DIR',str(ROOT/'target/native-player-sdk')))/'PFiles64/gstreamer/1.0/msvc_x86_64'
+sys.path.insert(0,str(ROOT/'scripts'))
+from toolchain_paths import GSTREAMER as GST
 
 
 from media_fixture import QuietHandler

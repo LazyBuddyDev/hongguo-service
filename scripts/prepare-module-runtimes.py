@@ -7,12 +7,10 @@ import sys
 import urllib.request
 import zipfile
 import tomllib
+from toolchain_paths import PYTHON, WHEELS
 
 ROOT=Path(__file__).resolve().parents[1]
-SDK=Path(__import__('os').environ.get('LAZYBUDDY_SDK_DIR',str(ROOT/'target/native-player-sdk')))
-DOWNLOADS=ROOT/'target/release-runtime-downloads'
-PYTHON=SDK/'lazybuddy-python'
-WHEELS=SDK/'lazybuddy-python-wheels'
+DOWNLOADS=ROOT/'target/downloads/runtime'
 
 
 def main():
