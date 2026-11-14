@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import struct,zlib
 from types import SimpleNamespace
 
 ROOT=Path(__file__).resolve().parent
@@ -15,7 +16,20 @@ from lazybuddy_hongguo.backend.progressive import Server
 class Account:
     sync_error=None
     probe=SimpleNamespace(cancel=lambda:None)
+    def __init__(self):self.state='idle';self.polls=0;self.favorites=[]
     def pending_progress(self):return False
+    def call(self,request):
+        command=request['command']
+        if command=='login':self.state='pending';self.polls=0
+        if command in ('cancel','logout'):self.state='idle';self.favorites=[]
+        if command=='status' and self.state=='pending':
+            self.polls+=1
+            if self.polls>=3:self.state='signed_in'
+        if command=='favorites':self.favorites=[dict(id='123',title='测试短剧',episodes=1)]
+        if command=='favorite_set':self.favorites=[dict(id='123',title='测试短剧',episodes=1)] if request['favorite'] else []
+        def chunk(kind,data):return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data)&0xffffffff)
+        png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',1,1,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(b'\0\0\0\0\xff'))+chunk(b'IEND',b'')
+        return dict(state=self.state,name='样例用户' if self.state=='signed_in' else '',qr=png if self.state=='pending' else b'',favorites=self.favorites,history={},error=None)
 
 class Source:
     connection=None
@@ -43,7 +57,8 @@ class Fixture(Media):
         return super().close(wait)
 
 def main():
-    service=Service(Account,media_factory=Fixture)
+    def search(request):return dict(version=1,id=request['id'],ok=True,data=dict(items=[dict(id='123',title='测试短剧',episodes=1)],page=1,has_more=False))
+    service = Service(Account,search_factory=search,media_factory=Fixture)
     try:
         for line in sys.stdin.buffer:
             request=json.loads(line)

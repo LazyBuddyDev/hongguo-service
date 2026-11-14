@@ -12,6 +12,15 @@ PROFILE = dict(cdid='fixture', openudid='fixture', clientudid='fixture', oaid_id
 
 
 class Tests(unittest.TestCase):
+    def test_preview_namespace_is_explicit_and_separates_credentials(self):
+        self.assertEqual(c.prefix(''),'LazyBuddy/Hongguo')
+        self.assertNotEqual(c.prefix('shell-preview'),c.prefix(''))
+        for scope in ('../website','A','x\n','x'*49):
+            with self.assertRaises(ValueError):c.prefix(scope)
+    def test_scoped_preview_writes_only_its_own_device_cache(self):
+        with patch.object(c,'PREFIX',c.prefix('shell-preview')),patch.dict(c.os.environ,LAZYBUDDY_INSTANCE='shell-preview'),patch.object(c,'_read',return_value=None),patch.object(c,'_write') as write:
+            self.assertTrue(c.remember_device('123',PROFILE))
+            self.assertTrue(write.call_args.args[0].startswith(c.prefix('shell-preview')+'/device/'))
     def setUp(self):
         saved = patch.object(c, 'read', return_value=dict(v=1, uid='123', cookies={'sessionid':'fixture'}))
         saved.start();self.addCleanup(saved.stop)

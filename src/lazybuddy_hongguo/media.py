@@ -10,6 +10,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import secrets
 from .jobs import Job
 from .errors import code
 
@@ -21,7 +22,8 @@ class Media:
         self.input_process=self.input_job=self.input_reader=None
         self.replies=queue.Queue(maxsize=1)
         self.events=queue.SimpleQueue()
-        self.generation=0
+        # Exact in JavaScript, unique across restarted service processes.
+        self.generation=secrets.randbelow(1<<48)
         self.resolver=None
         self.metadata={}
         self.arguments={}
@@ -37,6 +39,7 @@ class Media:
         self.browser=False
         self.resource=None
         self.suspended=False
+        self.browser_final=None
 
     def call(self,method,args):
         if method.startswith('playback.'):return self.playback(method,args)
@@ -73,7 +76,8 @@ class Media:
             if any(type(value) not in (int,float) or not math.isfinite(value) for value in (position,duration)) or not 0<duration<=86400 or not 0<=position<=duration:raise ValueError('media_request_failed')
             if not self.resource:raise ValueError('media_not_loaded')
             self.checkpoint(dict(position=position,duration=duration))
-            if args.get('final'):self.flush()
+            if args.get('final') and self.recorded!=self.browser_final:
+                self.browser_final=self.recorded;self.flush()
             return self.state()
         if method in ('playback.suspend','playback.resume'):
             if self.loading:self.close(wait=False);return self.state()
@@ -103,6 +107,7 @@ class Media:
         for option,(minimum,maximum) in {'position':(0,86400),'volume':(0,1),'speed':(0.25,4)}.items():
             if option in args and (type(args[option]) not in (int,float) or not math.isfinite(args[option]) or not minimum<=args[option]<=maximum):raise ValueError('media_request_failed')
         if 'mute' in args and type(args['mute']) is not bool:raise ValueError('media_request_failed')
+        self.browser=browser
         self.close(wait=False)
         self.browser=browser;self.suspended=False
         if self.metadata.get('series')!=series:self.metadata={}
@@ -243,7 +248,10 @@ class Media:
                 if self.request('status',{}).get('loaded'):self.checkpoint(self.request('pause',{}))
             except Exception:pass
         self.stop_resources()
-        thread=self.flush()
+        if self.browser:
+            thread=self.flush() if self.recorded!=self.browser_final else None
+            self.browser_final=self.recorded
+        else:thread=self.flush()
         with self.flush_guard:thread=self.flush_thread or thread
         if wait and thread:thread.join()
         return thread

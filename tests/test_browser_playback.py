@@ -19,6 +19,21 @@ class Source:
 
 
 class BrowserPlayback(unittest.TestCase):
+    def test_old_service_session_cannot_close_a_restarted_service(self):
+        account=Mock();account.sync_error=None
+        with patch('lazybuddy_hongguo.media.secrets.randbelow',side_effect=[101,202]):
+            previous=Media(account);current=Media(account)
+        current.browser=True;current.resource='fixture'
+        with patch.object(current,'close') as close:
+            with self.assertRaises(ValueError):current.call('playback.close',dict(session=previous.generation))
+            close.assert_not_called()
+    def test_unchanged_browser_final_checkpoint_does_not_start_another_sync(self):
+        account=Mock();account.sync_error=None
+        media=Media(account);media.browser=True;media.resource='fixture';media.recorded=('123',1,3.)
+        with patch.object(media,'checkpoint'),patch.object(media,'flush') as flush:
+            args=dict(session=media.generation,position=3.,duration=8.,final=True)
+            media.call('playback.checkpoint',args);media.call('playback.checkpoint',args);media.close(wait=False)
+            flush.assert_called_once()
     def setUp(self):
         self.source=Source();self.server=Server(self.source,origin=ORIGIN)
         self.thread=threading.Thread(target=self.server.serve);self.thread.start()

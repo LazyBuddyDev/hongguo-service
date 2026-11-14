@@ -4,8 +4,14 @@ from ctypes import wintypes
 import json
 import os
 import hashlib
+import re
 
-TARGET = 'LazyBuddy/Hongguo/website/v1'
+def prefix(scope):
+    if scope and not re.fullmatch(r'[a-z0-9-]{1,48}',scope):raise ValueError('invalid_credential_scope')
+    return 'LazyBuddy/Hongguo'+('/'+scope if scope else '')
+
+PREFIX=prefix(os.environ.get('LAZYBUDDY_CREDENTIAL_SCOPE',''))
+TARGET = PREFIX+'/website/v1'
 COOKIE_NAMES = {'sessionid', 'sessionid_ss', 'sid_tt', 'uid_tt', 'uid_tt_ss', 'sid_guard',
                 'passport_csrf_token', 'passport_csrf_token_default', 'passport_auth_status',
                 'passport_auth_status_ss'}
@@ -106,7 +112,7 @@ def _delete(target):
 def device_target(uid):
     if not isinstance(uid, str) or not uid.isascii() or not uid.isdecimal() or not 1 <= len(uid) <= 32 or int(uid) == 0:
         raise ValueError('invalid_saved_identity')
-    return 'LazyBuddy/Hongguo/device/v1/' + hashlib.sha256(uid.encode()).hexdigest()
+    return PREFIX+'/device/v1/' + hashlib.sha256(uid.encode()).hexdigest()
 
 
 def validate_device(profile):
@@ -145,8 +151,8 @@ def read_device(uid):
 
 
 def remember_device(uid, profile):
-    # QA may read the real account, but never changes its saved device.
-    if os.environ.get('LAZYBUDDY_INSTANCE', 'default') != 'default':
+    # Unscoped QA only reads the real device; a preview scope owns its cache.
+    if os.environ.get('LAZYBUDDY_INSTANCE', 'default') != 'default' and PREFIX=='LazyBuddy/Hongguo':
         return False
     validate_device(profile)
     current = read()

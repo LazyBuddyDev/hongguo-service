@@ -49,7 +49,7 @@ class Service:
         if not isinstance(args, dict):
             return error('invalid_request')
         if method == 'health':
-            return dict(version=VERSION, id=identifier, ok=True, data=dict(service='hongguo', api_version=VERSION,capabilities=dict(browser_resources=True)))
+            return dict(version=VERSION, id=identifier, ok=True, data=dict(service='hongguo', api_version=VERSION,capabilities=dict(browser_resources=True,credential_scopes=True)))
         if method=='lifecycle.suspend':
             if args:return error('invalid_request')
             try:
