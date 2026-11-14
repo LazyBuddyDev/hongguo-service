@@ -1,18 +1,20 @@
 # Functional tasks
 
-## LB-20261113-01 — LazyBuddy modular application
+## Archived
 
-Status: user approved the browser service/host source for main integration, without software publication. Owner: Leager / Windows Codex. Updated: 2026-11-14. Branch: main (this integration), source implementation79c03d9. Whole-product acceptance is tracked in LazyBuddyDev/LazyBuddy TASKS.md; remaining intermittent failures and full host migration stay open. This is the same functional requirement, not a phase task.
+### LB-20261113-01 — LazyBuddy modular application
+
+Status: completed and archived with LazyBuddy v2.0.0 / modules-v2.0.0. Owner: Leager / Windows Codex. Updated: 2026-11-15. Branch: main. Whole-product evidence and disclosed limits are maintained in the host TASKS.md; no full real-programme stress-test claim.
 
 - `[√]` Own hongguo source, API, manifests, build/package scripts, tests and CI without desktop source imports.
 - `[√]` Independently build packages and verify external host/API integration.
 - `[√]` Publish under LazyBuddyDev/hongguo-service, MIT copyright 2026 Leager, preserving third-party terms.
 - `[√]` Start from one parentless initial commit, per user request; old Git branches/tags are removed and a local ignored recovery bundle is kept.
-- `[x]` Final whole-product acceptance and signed binary publication; Hongguo real-account permission/AV checks need the user's QR scan, and real writes need separate authorization.
+- `[√]` Final signed host/module snapshots published. User confirmed continuous real playback, series/episode switching and seeking AV behavior; no repeated real account writes. Short synthetic resource baseline reviewed, long real-programme stress testing remains outside the release evidence.
 
 Evidence: news core 7 and HTTP boundary 2 tests; Hongguo Python 80, search 5 (one real-network case ignored), decoder protocol 4 and Go resolver passed. Independent package health/install/remove/HEIC and external-host synthetic playback passed. Test only the affected layer for ordinary changes. CI runs independently in this repository.
 
-Next: diagnose the remaining intermittent playback failures, complete full host migration and remaining real-media acceptance. Software publication requires separate authorization. Do not archive the whole requirement prematurely.
+Next: no delivery blocker. Keep immutable stable snapshots; investigate newly observed upstream failures with bounded redacted logs. Any future real account writes still need explicit authorization.
 
 Main integration approval: service79c03d9/CI43608704147 and host42ff99d/CI43608695182 passed; both browser branches could fast-forward main. Native experiments were excluded and subsequently archived in verified private local bundles before user-authorized branch cleanup; only main remains. No tags, releases or signed-catalog changes are authorized in this integration. Host cleanup removed unused build/incremental caches while preserving this Git repository, SDKs, current packages/runtime, fixtures and concise evidence. Current follow-up is remaining failure diagnosis and full host migration, with any software publication separately authorized.
 
@@ -39,3 +41,5 @@ Real acceptance failure, same host UI task: the user logged in and reported app_
 2026-11-15: User authorized release preparation and focused online distribution/update checks. Browser feature candidate advances to 0.2.6 for a new immutable package after packaging/toolchain/documentation changes; API/business behavior is unchanged. Real programme AV and final host resource acceptance remain separate. No new account writes are authorized by this step.
 
 2026-11-15 Web test distribution: existing modules-v0.1.0 release now also hosts the separate signed web-catalog.json, with news0.1.0 / hongguo0.2.6 / python-runtime0.1.0. Original news/Python ZIP bytes are reused; the native catalog remains unchanged. Host release aacc5d5 and Hongguo source59a1bcd; both CI passed. An isolated published CLI downloaded/verified/installed the real HTTPS catalog and packages without proxy environment variables, called health, and reclaimed dependencies on removal (11.93s). Actual online application replacement also passed, preserving settings/modules and clearing stage/backup. Evidence belongs to the host tmp/verification-release. Stable publication and final real programme AV/resource acceptance remain open; no real account writes were performed.
+
+2026-11-15 stable closeout: host source b3b4b42 and service59a1bcd; v2.0.0 / modules-v2.0.0 are immutable, signed web catalog now points to stable assets. Actual stable HTTPS install/health/uninstall and application online exit/replace/restart with settings/modules preserved passed. The host-only follow-up fixes seek release snap-back and implicit default mute, with related unit/type and release-WebView checks. Intermittent upstream redirect failures remain a disclosed limitation with logs/manual retry, not a confirmed root-cause fix.
