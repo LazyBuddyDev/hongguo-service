@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lazybuddy-hongguo"
+license = {file = "LICENSE"}
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Private Hongguo account service adapter for LazyBuddy and standalone clients"
+dependencies = ["cryptography==50.0.1", "cffi==2.1.1", "pycparser==3.12", "pillow-heif==1.8.1", "Pillow==12.2.0"]
+
+[project.scripts]
+lazybuddy-hongguo = "lazybuddy_hongguo.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+lazybuddy_hongguo = ["backend/*.py"]

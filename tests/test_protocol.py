@@ -1,0 +1,121 @@
+import unittest
+import threading
+import base64
+from lazybuddy_hongguo.protocol import Service
+
+
+class Backend:
+    def call(self, request):
+        return dict(state='signed_in', name='fixture', qr=[], favorites=[dict(id='1', title='fixture',
+            cover='SECRET_SIGNED_URL', cookies='SECRET_COOKIE')], owner='SECRET_UID',
+            playback_session=dict(profile='SECRET_DEVICE', cookies='SECRET_COOKIE'))
+
+
+class ProtocolTests(unittest.TestCase):
+    def test_cloud_progress_is_async_and_local_snapshot_remains_available(self):
+        entered=threading.Event();release=threading.Event()
+        class Account(Backend):
+            def call(self,request):
+                if request['command']=='sync':entered.set();release.wait(2)
+                return dict(super().call(request),history={'123':dict(episode=1,time=12.,updated=100.)})
+        service=Service(Account)
+        def call(method):return service.handle(dict(version=1,id='fixture',method=method))
+        call('account.restore')
+        try:
+            self.assertEqual(call('progress.sync')['data']['operation'],'pending')
+            self.assertTrue(entered.wait(1))
+            self.assertEqual(call('progress.read')['data']['history']['123']['time'],12.)
+        finally:
+            release.set()
+            if service.operation:service.operation[0].join(2)
+        result=call('account.status')['data']
+        self.assertEqual(result['operation_method'],'progress.sync');self.assertIsNone(result['operation'])
+    def test_qr_is_a_compact_png_payload_instead_of_a_json_integer_array(self):
+        class Account:
+            def call(self,request):return dict(state='pending',qr=b'fixture-png')
+        reply=Service(Account).handle(dict(version=1,id='fixture',method='account.status'))
+        self.assertEqual(base64.b64decode(reply['data']['qr_png']),b'fixture-png')
+        self.assertNotIn('qr',reply['data'])
+    def test_close_stops_media_before_waiting_for_an_account_write(self):
+        entered=threading.Event();release=threading.Event();stopped=threading.Event()
+        class Account(Backend):
+            class probe:
+                @staticmethod
+                def cancel():pass
+            def call(self,request):
+                if request['command']=='favorite_set':entered.set();release.wait(2)
+                return super().call(request)
+        class Media:
+            def __init__(self,account):pass
+            def call(self,method,args):return dict(playing=False)
+            def close(self,wait=True):stopped.set()
+        service=Service(Account,media_factory=Media)
+        for method,args in [('account.restore',{}),('media.status',{}),('favorites.set',dict(series='1',favorite=True))]:service.handle(dict(version=1,id='fixture',method=method,args=args))
+        self.assertTrue(entered.wait(1))
+        closing=threading.Thread(target=service.close);closing.start()
+        try:self.assertTrue(stopped.wait(.5));self.assertTrue(closing.is_alive())
+        finally:release.set();closing.join(2)
+        self.assertFalse(closing.is_alive())
+    def test_slow_favorite_write_does_not_block_pause_and_requires_completion_poll(self):
+        entered=threading.Event();release=threading.Event()
+        class Account(Backend):
+            def call(self,request):
+                if request['command']=='favorite_set':entered.set();release.wait(2)
+                return super().call(request)
+        class Media:
+            def __init__(self,account):pass
+            def call(self,method,args):return dict(playing=False)
+        service=Service(Account,media_factory=Media)
+        def call(method,**args):return service.handle(dict(version=1,id='fixture',method=method,args=args))
+        call('account.restore')
+        try:
+            pending=call('favorites.set',series='1',favorite=True)
+            self.assertEqual(pending['data']['operation'],'pending')
+            self.assertTrue(entered.wait(1))
+            self.assertFalse(call('media.pause')['data']['playing'])
+            self.assertEqual(call('account.status')['data']['operation'],'pending')
+            self.assertEqual(call('account.logout')['error']['code'],'account_busy')
+        finally:
+            release.set()
+            if service.operation:service.operation[0].join(2)
+        completed=call('account.status')
+        self.assertIsNone(completed['data']['operation'])
+        self.assertIsNone(service.operation)
+    def test_public_reply_excludes_private_session_and_media_fields(self):
+        service = Service(Backend)
+        reply = service.handle(dict(version=1, id='one', method='account.status'))
+        self.assertTrue(reply['ok'])
+        self.assertNotIn('SECRET', str(reply))
+        self.assertEqual(reply['data']['favorites'][0]['id'], '1')
+
+    def test_health_and_invalid_requests_do_not_create_backend(self):
+        def forbidden():
+            self.fail('backend must not be started')
+        service = Service(forbidden)
+        self.assertTrue(service.handle(dict(version=1, id='one', method='health'))['ok'])
+        for request in [None, dict(version=1,id='bad',method={}),dict(version=1,id='bad',method=[]), dict(version=2, id='one', method='account.login'),
+                        dict(version=1, id='one', method='arbitrary'),
+                        dict(version=1, id='one', method='favorites.set', args=dict(series='../', favorite=True))]:
+            self.assertFalse(service.handle(request)['ok'])
+
+    def test_search_projects_private_covers_before_reply(self):
+        service=Service(Backend,lambda request:dict(version=1,id=request['id'],ok=True,data=dict(items=[dict(id='1',title='fixture',_cover='SECRET_URL')],page=1,has_more=False)))
+        reply=service.handle(dict(version=1,id='search',method='search',args=dict(query='fixture')))
+        self.assertTrue(reply['ok'])
+        self.assertNotIn('SECRET',str(reply))
+        self.assertEqual(service.covers['1'],'SECRET_URL')
+
+    def test_media_allowlist_and_progress_busy_boundary(self):
+        class Media:
+            def __init__(self,account):pass
+            def call(self,method,args):return dict(playing=True)
+        service=Service(Backend,media_factory=Media)
+        self.assertFalse(service.handle(dict(version=True,id='bad',method='health'))['ok'])
+        self.assertFalse(service.handle(dict(version=1,id='bad',method='media.open',args=dict(url='SECRET')))['ok'])
+        self.assertTrue(service.handle(dict(version=1,id='play',method='media.status'))['ok'])
+        reply=service.handle(dict(version=1,id='sync',method='progress.sync'))
+        self.assertEqual(reply['error']['code'],'player_busy')
+
+
+if __name__ == '__main__':
+    unittest.main()

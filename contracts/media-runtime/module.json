@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "media-runtime",
+  "name": "Media Runtime",
+  "version": "0.1.0",
+  "service_api": 1,
+  "target": "windows-x86_64",
+  "kind": "runtime",
+  "page": null,
+  "entrypoint": "service/lazybuddy_media.py",
+  "dependencies": [
+    {
+      "id": "python-runtime",
+      "version": "0.1.0"
+    }
+  ]
+}

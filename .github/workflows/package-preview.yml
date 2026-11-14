@@ -1,0 +1,47 @@
+name: hongguo Windows packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Distribution preflight
+        shell: pwsh
+        run: |
+          if (!(Test-Path -LiteralPath LICENSE)) { throw 'Project license must be confirmed before uploading distribution artifacts.' }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            search/target/release
+          key: lazybuddy-release-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+      - name: Build service packages
+        shell: pwsh
+        run: |
+          cargo build --release --locked --manifest-path search/Cargo.toml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & scripts/prepare-media-sdk.ps1
+          & scripts/build-hongguo-resolver.ps1
+          python -B scripts/prepare-module-runtimes.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -B scripts/package-modules.py --output target/packages
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hongguo-windows-development-packages
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            target/packages/*.zip
+            target/packages/catalog.json

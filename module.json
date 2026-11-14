@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "hongguo",
+  "name": "红果短剧",
+  "version": "0.1.0",
+  "service_api": 1,
+  "target": "windows-x86_64",
+  "entrypoint": "service/main.py",
+  "runtime": "python-runtime",
+  "page": {
+    "template": "media_library",
+    "search_method": "search",
+    "favorites_method": "favorites.read"
+  },
+  "dependencies": [
+    {
+      "id": "python-runtime",
+      "version": "0.1.0"
+    },
+    {
+      "id": "media-runtime",
+      "version": "0.1.0"
+    }
+  ]
+}
