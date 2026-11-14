@@ -14,6 +14,8 @@ Follow-up source review: [issue 2's controlled comparison](https://github.com/be
 
 ## Resource contract
 
+Candidate 0.2.3 aligns helper proxy routing with urllib: service startup forwards selected http/https/all/no proxy settings to its own child environment, retaining explicit environment overrides. The external host's persisted direct setting clears proxy addresses and sets NO_PROXY=* only for this service; disabling it starts a fresh service following system/environment settings. This changes no machine/Clash configuration and cannot bypass a TUN route. Network tests cover system-proxy forwarding and direct mode never reading Windows proxy registry settings. Real playback with Clash still active remains manual acceptance.
+
 The 0.2.1 candidate exposes compressed MP4 resources instead of requiring a native decoder. The service retains identity checks, episode permissions, quality selection and bounded offset-preserving Range preparation. The browser performs demuxing, decoding, AV synchronization and rendering. `media-runtime` is absent from the feature's required dependencies and default package build; Python and the bundled Go/search helpers remain required. Existing signed 0.1.0 catalog entries are unchanged. Do not deliver this candidate to the old Iced media consumer before its host migration.
 
 The control transport remains version-1 JSON Lines on the private child pipes:

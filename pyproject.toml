@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lazybuddy-hongguo"
 license = {file = "LICENSE"}
-version = "0.2.2"
+version = "0.2.3"
 requires-python = ">=3.11"
 description = "Private Hongguo account service adapter for LazyBuddy and standalone clients"
 dependencies = ["cryptography==50.0.1", "cffi==2.1.1", "pycparser==3.12", "pillow-heif==1.8.1", "Pillow==12.2.0"]
