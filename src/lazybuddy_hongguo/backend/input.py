@@ -25,7 +25,7 @@ def main():
         from lazybuddy_hongguo.backend import passport
         from lazybuddy_hongguo.backend.app_input import resolve
         def failure(error):print(json.dumps(dict(ok=False,error=code(error))),flush=True)
-        result,server=resolve(request.get('series'),request.get('episode'),request.get('quality'),request.get('resolver'),passport.Passport,failure)
+        result,server=resolve(request.get('series'),request.get('episode'),request.get('quality'),request.get('resolver'),passport.Passport,failure,origin=request.get('origin'))
         print(json.dumps(result,separators=(',',':')),flush=True)
         server.serve()
         return 0

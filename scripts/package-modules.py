@@ -74,7 +74,7 @@ def stage(identifier,destination,profile):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--modules',default='hongguo,python-runtime,media-runtime')
+    parser.add_argument('--modules',default='hongguo,python-runtime')
     parser.add_argument('--profile',choices=['debug','release'],default='release')
     parser.add_argument('--output',type=Path,default=ROOT/'target/packages')
     parser.add_argument('--base-url',default='https://example.invalid/lazybuddy')

@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "hongguo",
   "name": "红果短剧",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "service_api": 1,
   "target": "windows-x86_64",
   "entrypoint": "service/main.py",
@@ -15,10 +15,6 @@
   "dependencies": [
     {
       "id": "python-runtime",
-      "version": "0.1.0"
-    },
-    {
-      "id": "media-runtime",
       "version": "0.1.0"
     }
   ]

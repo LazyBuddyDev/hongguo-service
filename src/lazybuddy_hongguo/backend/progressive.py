@@ -186,7 +186,9 @@ class Source:
                     at=block+len(value)
                     stop=min(block+self.BLOCK,self.total)
                     if value:stop=min(stop,max(at,start)+self.INITIAL)
-                    value+=self.clear(at,self.fetch(at,stop-1));self.cache[block]=value
+                    fetched=self.clear(at,self.fetch(at,stop-1))
+                    if cancelled():return
+                    value+=fetched;self.cache[block]=value
                     while len(self.cache)>8:self.cache.popitem(last=False)
                 self.cache.move_to_end(block)
                 size=min(end-start+1,len(value)-(start-block));result=value[start-block:start-block+size]
@@ -196,27 +198,51 @@ class Source:
         with self.lock:return {'file_bytes':self.total,'downloaded_bytes':self.downloaded,'metadata_bytes':len(self.moov),'cache_bytes':sum(map(len,self.cache.values())),'cache_limit':8*self.BLOCK,'range_requests':self.requests,'samples_encrypted':len(self.spans)}
 
 class Server:
-    def __init__(self,source,on_error=None):
-        self.source=source;self.token=secrets.token_urlsafe(32);self.generation=0;self.reader_lock=threading.Lock();self.error_lock=threading.Lock();self.error_notified=False;owner=self
+    def __init__(self,source,on_error=None,origin=None):
+        self.source=source;self.origin=origin;self.active=True;self.token=secrets.token_urlsafe(32);self.generation=0;self.reader_lock=threading.Lock();self.error_lock=threading.Lock();self.error_notified=False;owner=self
         class Handler(http.server.BaseHTTPRequestHandler):
             def setup(self):
                 super().setup();self.connection.settimeout(5)
             def log_message(self,*_):pass
             def do_HEAD(self):self.respond(False)
             def do_GET(self):self.respond(True)
+            def target(self):return self.headers.get('Host')==owner.host and self.path=='/'+owner.token+'/stream.mp4'
+            def cors(self):
+                if owner.origin:
+                    self.send_header('Access-Control-Allow-Origin',owner.origin);self.send_header('Vary','Origin')
+                    self.send_header('Access-Control-Expose-Headers','Content-Length, Content-Range, Accept-Ranges')
+            def do_OPTIONS(self):
+                if not self.target() or not owner.origin or self.headers.get('Origin')!=owner.origin:self.send_error(403);return
+                self.send_response(204);self.cors();self.send_header('Access-Control-Allow-Methods','GET, HEAD');self.send_header('Access-Control-Allow-Headers','Range')
+                if self.headers.get('Access-Control-Request-Private-Network')=='true':self.send_header('Access-Control-Allow-Private-Network','true')
+                self.send_header('Content-Length','0');self.end_headers()
+            def do_POST(self):
+                # Only the owning local service controls a stream. Browsers get read access.
+                if not self.target() or self.headers.get('Origin') or self.headers.get('Sec-Fetch-Site'):self.send_error(403);return
+                if self.headers.get('Content-Length') not in ('6','7'):self.send_error(400);return
+                command=self.rfile.read(int(self.headers['Content-Length']))
+                if command not in (b'suspend',b'resume'):self.send_error(400);return
+                with owner.reader_lock:owner.active=command==b'resume';owner.generation+=1
+                self.send_response(204);self.send_header('Content-Length','0');self.end_headers()
             def respond(self,body):
-                if self.headers.get('Host')!=owner.host or self.path!='/'+owner.token+'/stream.mp4':self.send_error(404);return
+                if not self.target():self.send_error(404);return
+                if owner.origin and self.headers.get('Origin')!=owner.origin:self.send_error(403);return
+                if not owner.active:self.send_error(409);return
                 try:lo,hi=byte_range(self.headers.get('Range'),source.total)
                 except ValueError:self.send_error(416);return
                 if body:
-                    with owner.reader_lock:owner.generation+=1;generation=owner.generation
+                    with owner.reader_lock:
+                        # Browsers can concurrently read an index and media range.
+                        # Only lifecycle changes invalidate browser reads.
+                        if owner.origin is None:owner.generation+=1
+                        generation=owner.generation
                 partial=self.headers.get('Range') is not None
-                self.send_response(206 if partial else 200);self.send_header('Content-Length',str(hi-lo+1));self.send_header('Content-Type','video/mp4');self.send_header('Accept-Ranges','bytes');self.send_header('Cache-Control','no-store');self.send_header('Connection','close')
+                self.send_response(206 if partial else 200);self.cors();self.send_header('Content-Length',str(hi-lo+1));self.send_header('Content-Type','video/mp4');self.send_header('Accept-Ranges','bytes');self.send_header('Cache-Control','no-store');self.send_header('Connection','close')
                 if partial:self.send_header('Content-Range',f'bytes {lo}-{hi}/{source.total}')
                 self.end_headers()
                 if body:
                     try:
-                        for data in source.read(lo,hi,lambda:generation!=owner.generation):self.wfile.write(data)
+                        for data in source.read(lo,hi,lambda:generation!=owner.generation or not owner.active):self.wfile.write(data)
                     except OSError:pass
                     except ValueError as error:
                         source.error=str(error)
@@ -227,5 +253,6 @@ class Server:
         self.host=f'127.0.0.1:{self.server.server_port}';self.address='http://'+self.host+'/'+self.token+'/stream.mp4'
     def serve(self):self.server.serve_forever()
     def close(self):
+        self.active=False;self.generation+=1
         self.server.server_close()
         if getattr(self.source,'connection',None) is not None:self.source.connection.close()

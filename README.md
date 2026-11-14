@@ -5,24 +5,21 @@ Independent Windows x64 account/media API, owned by LazyBuddyDev/hongguo-service
 ```powershell
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install .
-.venv/Scripts/python.exe -B -m unittest discover -s tests
-.venv/Scripts/python.exe -B runtimes/media/test_protocol.py
-cargo test --locked --manifest-path search/Cargo.toml
+.venv/Scripts/python.exe -B scripts/check-changes.py --base origin/main
 ```
 
-For source runs set PYTHONPATH=src and run `python -m lazybuddy_hongguo`; health does not load an account or decoder. See docs/module-api.md for fields, pending transactions, private IPC and lifecycle.
+For source runs set PYTHONPATH=src and run `python -m lazybuddy_hongguo`; health does not load an account or decoder. See docs/module-api.md for business fields and [browser playback](docs/browser-playback.md) for the 0.2.0 resource-session API. The browser handles decoding/rendering; the service retains account, permission and bounded media preparation.
 
 Build feature/runtime packages independently:
 
 ```powershell
 cargo build --release --locked --manifest-path search/Cargo.toml
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-hongguo-resolver.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-media-sdk.ps1
 python -B scripts/prepare-module-runtimes.py
 python -B scripts/package-modules.py --output target/packages
 ```
 
-SDKs default to target/native-player-sdk. LAZYBUDDY_SDK_DIR may explicitly select an existing verified private SDK cache; this is a build input, never a desktop source dependency. Go output is target/hongguo-app-resolver.exe, Rust search output is search/target/release, and the Python package keeps runtime dependencies private. The package script emits hongguo, python-runtime and media-runtime ZIPs plus metadata. No SDK headers, account data, signed media URLs or developer environment are bundled.
+SDKs default to target/native-player-sdk. LAZYBUDDY_SDK_DIR may explicitly select an existing verified private SDK cache; this is a build input, never a desktop source dependency. Go output is target/hongguo-app-resolver.exe, Rust search output is search/target/release, and Python dependencies stay private. Default packaging emits hongguo and python-runtime ZIPs; the browser feature does not require GStreamer. The older native decoder remains an explicit `--modules media-runtime` build, requiring prepare-media-sdk.ps1. No SDK headers, account data, signed media URLs or developer environment are bundled. The candidate catalog is not published to the old Iced host.
 
 Credentials use Windows secure storage in the LazyBuddy namespace. Account restoration, App playback permission, official favorite writes and cloud progress confirmation require separate validation. Identity is not proof of every episode's permission. QR PNG is Base64; only identity verification plus secure saving completes login. Cancel and logout differ. Official account transactions run asynchronously and cannot block media control; local progress survives failed or canceled synchronization.
 

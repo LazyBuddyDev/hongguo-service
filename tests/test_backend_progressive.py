@@ -32,6 +32,15 @@ class FakeSource(m.Source):
         value=self.data[start:end+1];self.total=len(self.data);self.downloaded+=len(value);self.requests+=1;return value
 
 class Tests(unittest.TestCase):
+    def test_fetch_finishing_after_suspend_does_not_populate_cache(self):
+        data,_,key,_=fixture(padding=1024*1024);source=FakeSource(data,key)
+        before=dict(source.cache);cancelled=False;fetch=source.fetch
+        def late(start,end):
+            nonlocal cancelled
+            value=fetch(start,end);cancelled=True;return value
+        source.fetch=late
+        self.assertEqual(list(source.read(source.BLOCK,source.BLOCK+9,lambda:cancelled)),[])
+        self.assertEqual(dict(source.cache),before)
     def test_partial_startup_block_extends_without_changing_ctr_offsets(self):
         data,clear,key,offset=fixture(metadata_padding=64000,padding=1024*1024)
         source=FakeSource(data,key)

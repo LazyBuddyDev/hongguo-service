@@ -49,7 +49,7 @@ class Service:
         if not isinstance(args, dict):
             return error('invalid_request')
         if method == 'health':
-            return dict(version=VERSION, id=identifier, ok=True, data=dict(service='hongguo', api_version=VERSION))
+            return dict(version=VERSION, id=identifier, ok=True, data=dict(service='hongguo', api_version=VERSION,capabilities=dict(browser_resources=True)))
         if method=='lifecycle.suspend':
             if args:return error('invalid_request')
             try:
@@ -85,6 +85,8 @@ class Service:
         media_commands = {'media.open': {'series', 'episode', 'quality', 'pipe','position','volume','mute','speed'}, 'media.play': set(),
             'media.pause': set(), 'media.seek': {'value'}, 'media.speed': {'value'}, 'media.boost':{'value'}, 'media.volume': {'value'},
             'media.mute': {'value'}, 'media.status': set(), 'media.close': set()}
+        media_commands.update({'playback.open':{'series','episode','quality','origin'},'playback.status':set(),
+            'playback.suspend':{'session'},'playback.resume':{'session'},'playback.close':{'session'},'playback.checkpoint':{'session','position','duration','final'}})
         if method in media_commands:
             if set(args) - media_commands[method]:
                 return error('invalid_request')
@@ -130,7 +132,7 @@ class Service:
                 self.account = self.account_factory()
             if method == 'progress.sync' and self.media is not None:
                 media=self.media.call('media.status', {})
-                if media.get('playing') or media.get('loading'):return error('player_busy')
+                if media.get('playing') or media.get('loading') or media.get('prepared'):return error('player_busy')
             if raw is None:
                 if method in ('favorites.read','favorites.set','progress.sync'):
                     if self.last_account.get('state')!='signed_in':return error('login_required')

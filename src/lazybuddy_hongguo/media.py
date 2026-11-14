@@ -8,6 +8,8 @@ import re
 import sys
 import threading
 import time
+import urllib.parse
+import urllib.request
 from .jobs import Job
 from .errors import code
 
@@ -32,8 +34,12 @@ class Media:
         self.flush_guard=threading.Lock()
         self.flush_thread=None
         self.flush_again=False
+        self.browser=False
+        self.resource=None
+        self.suspended=False
 
     def call(self,method,args):
+        if method.startswith('playback.'):return self.playback(method,args)
         if method=='media.open':return self.open(args)
         if method=='media.close':
             self.close(wait=False)
@@ -54,8 +60,38 @@ class Media:
         if method=='media.pause':self.checkpoint(state);self.flush()
         return dict(self.metadata,**state,progress_error=self.local_error or self.account.sync_error)
 
-    def open(self,args):
-        if not isinstance(args.get('pipe'),str) or not re.fullmatch(r'\\\\\.\\pipe\\lazybuddy-media-[a-f0-9]{16,64}',args['pipe']):raise ValueError('invalid_media_pipe')
+    def playback(self,method,args):
+        if method=='playback.open':return self.open(args,browser=True)
+        self.pump()
+        if not self.browser:raise ValueError('media_not_loaded')
+        if method!='playback.status' and (type(args.get('session')) is not int or args['session']!=self.generation):raise ValueError('media_not_loaded')
+        if method=='playback.close':self.close(wait=False);return self.state()
+        if method=='playback.status':return self.state()
+        if method=='playback.checkpoint':
+            if 'final' in args and type(args['final']) is not bool:raise ValueError('media_request_failed')
+            position,duration=args.get('position'),args.get('duration')
+            if any(type(value) not in (int,float) or not math.isfinite(value) for value in (position,duration)) or not 0<duration<=86400 or not 0<=position<=duration:raise ValueError('media_request_failed')
+            if not self.resource:raise ValueError('media_not_loaded')
+            self.checkpoint(dict(position=position,duration=duration))
+            if args.get('final'):self.flush()
+            return self.state()
+        if method in ('playback.suspend','playback.resume'):
+            if self.loading:self.close(wait=False);return self.state()
+            if not self.resource:raise ValueError('media_not_loaded')
+            request=urllib.request.Request(self.resource,data=b'suspend' if method.endswith('suspend') else b'resume',method='POST')
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request,timeout=5) as response:
+                if response.status!=204:raise ValueError('media_state_failed')
+            self.suspended=method.endswith('suspend')
+            return self.state()
+        raise ValueError('media_request_failed')
+
+    def open(self,args,browser=False):
+        if browser:
+            origin=args.get('origin')
+            if not isinstance(origin,str) or len(origin)>2048:raise ValueError('media_request_failed')
+            parsed=urllib.parse.urlsplit(origin)
+            if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment or origin!=f'{parsed.scheme}://{parsed.netloc}':raise ValueError('media_request_failed')
+        elif not isinstance(args.get('pipe'),str) or not re.fullmatch(r'\\\\\.\\pipe\\lazybuddy-media-[a-f0-9]{16,64}',args['pipe']):raise ValueError('invalid_media_pipe')
         if os.environ.get('LAZYBUDDY_INSTANCE','default')!='default' and os.environ.get('LAZYBUDDY_PLAYER_REAL')!='1':raise ValueError('media_network_disabled')
         if self.account.probe.state in ('pending','scanned'):raise ValueError('login_required')
         if self.account.probe.state!='signed_in' or not self.account.probe.saved:self.account.restore_local()
@@ -68,11 +104,12 @@ class Media:
             if option in args and (type(args[option]) not in (int,float) or not math.isfinite(args[option]) or not minimum<=args[option]<=maximum):raise ValueError('media_request_failed')
         if 'mute' in args and type(args['mute']) is not bool:raise ValueError('media_request_failed')
         self.close(wait=False)
+        self.browser=browser;self.suspended=False
         if self.metadata.get('series')!=series:self.metadata={}
         self.metadata.update(series=series,episode=episode)
         self.arguments=args.copy()
         self.error=None;self.loading=True
-        wire=(json.dumps(dict(series=series,episode=episode,quality=quality,resolver=self.resolver),separators=(',',':'))+'\n').encode()
+        wire=(json.dumps(dict(series=series,episode=episode,quality=quality,resolver=self.resolver,**({'origin':origin} if browser else {})),separators=(',',':'))+'\n').encode()
         if len(wire)>65536:self.loading=False;raise ValueError('resolver_session_too_large')
         try:
             self.input_job=Job()
@@ -112,6 +149,11 @@ class Media:
                         or not self.account.current_identity(result['resolver']['owner'])):raise ValueError('saved_session_verification_failed')
                 self.resolver=result['resolver']
                 self.metadata={key:result[key] for key in ('series','episode','episodes','width','height','available_qualities')}
+                if self.browser:
+                    address=urllib.parse.urlsplit(result['media'])
+                    if address.scheme!='http' or address.hostname!='127.0.0.1' or not address.port or address.username or address.password or address.query or address.fragment or not re.fullmatch(r'/[A-Za-z0-9_-]{16,128}/stream\.mp4',address.path):raise ValueError('media_input_failed')
+                    self.resource=result['media'];self.loading=False
+                    continue
                 runtime=Path(os.environ['LAZYBUDDY_DEPENDENCY_MEDIA_RUNTIME_DIR'])
                 self.decoder_job=Job()
                 self.process=self.decoder_job.spawn([sys.executable,'-I','-B',str(runtime/'service/lazybuddy_media.py')],
@@ -136,6 +178,9 @@ class Media:
                 self.error=code(error);self.close(wait=False)
 
     def state(self):
+        if self.browser:return dict(self.metadata,loading=self.loading,prepared=self.resource is not None,session=self.generation,
+                resource=dict(url=self.resource,mime='video/mp4') if self.resource else None,suspended=self.suspended,error=self.error,
+                progress_error=self.local_error or self.account.sync_error,progress_pending=self.flush_thread is not None)
         try:
             state=self.request('status',{}) if self.process is not None else dict(loaded=False,playing=False,eos=False,position=0,duration=0)
         except Exception as failure:
@@ -205,6 +250,7 @@ class Media:
 
     def stop_resources(self):
         self.generation+=1
+        self.resource=None
         for prefix in ('decoder','input'):
             job=getattr(self,prefix+'_job')
             process=self.process if prefix=='decoder' else self.input_process

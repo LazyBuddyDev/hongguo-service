@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import credentials
 from .progressive import Source,Server
 
-def resolve(series,episode,quality,session,passport,on_error=None):
+def resolve(series,episode,quality,session,passport,on_error=None,origin=None):
     if not isinstance(series,str) or not series.isascii() or not series.isdecimal() or not 1<=len(series)<=32 or int(series)==0:raise ValueError('invalid_series')
     if not isinstance(episode,int) or isinstance(episode,bool) or not 1<=episode<=9999:raise ValueError('invalid_episode')
     if quality not in ('360p','480p','720p','1080p'):raise ValueError('invalid_quality')
@@ -52,7 +52,7 @@ def resolve(series,episode,quality,session,passport,on_error=None):
     catalog=value['catalog']
     episodes=sorted({v['number'] for v in catalog if v['playable']})
     if episode not in episodes:raise ValueError('episode_unavailable')
-    server=Server(source,on_error)
+    server=Server(source,on_error,origin=origin)
     result=dict(ok=True,identity_verified=True,series=series,episode=episode,episodes=episodes,width=width,height=height,available_qualities=value.get('available_qualities',[]),requested_quality=quality,transport='range_mp4',media=server.address,container=dict(video=True,audio=True,protected=False),
         resolver=dict(owner=saved['uid'],series=series,profile=value['profile'],catalog=catalog),
         source_info=dict(backend='app',resolve_ms=resolve_ms,timings=dict(identity_before_ms=identity_before_ms,identity_after_ms=identity_after_ms,source_prepare_ms=source_prepare_ms,total_prepare_ms=round((time.monotonic()-prepare_started)*1000)),device_reused=profile is not None,initial=source.stats()))

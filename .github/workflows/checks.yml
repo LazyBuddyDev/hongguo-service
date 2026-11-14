@@ -7,23 +7,18 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
       - name: Python service tests
         shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           python -m venv .venv
           & .venv/Scripts/python.exe -m pip install --disable-pip-version-check --no-cache-dir .
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & .venv/Scripts/python.exe -B -m unittest discover -s tests
+          & .venv/Scripts/python.exe -B scripts/check-changes.py --base "$env:BASE_SHA"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & .venv/Scripts/python.exe -B runtimes/media/test_protocol.py
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Search and resolver tests
-        shell: pwsh
-        run: |
-          cargo test --locked --manifest-path search/Cargo.toml
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Push-Location resolver
-          try { go test ./...; if ($LASTEXITCODE) { exit $LASTEXITCODE } } finally { Pop-Location }
