@@ -47,7 +47,7 @@ def resolve(series,episode,quality,session,passport,on_error=None,origin=None):
     with ThreadPoolExecutor(max_workers=1) as worker:
         identity=worker.submit(verify_identity)
         source_started=time.monotonic()
-        source=Source(value['url'],key)
+        source=Source(value['url'],key,dict(series=series,episode=episode,quality=quality))
         if value.get('size',0)>0 and source.total!=value['size']:raise ValueError('media_size_changed')
         source_prepare_ms=round((time.monotonic()-source_started)*1000)
         identity_after_ms=identity.result()

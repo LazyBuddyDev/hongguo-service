@@ -61,7 +61,7 @@ class Tests(unittest.TestCase):
             with self.assertRaises(m.urllib.error.URLError):source.open_range(m.urllib.request.Request(source.url))
             self.assertEqual(factory.call_count,1)
     def test_keepalive_403_is_terminal_without_reconnect(self):
-        source=m.Source.__new__(m.Source);source.url='https://fixture.qznovelvod.com/a';source.origin=('fixture.qznovelvod.com',443);source.proxy=False;source.tls=None;source.denied=False
+        source=m.Source.__new__(m.Source);source.url='https://fixture.qznovelvod.com/a';source.origin=('fixture.qznovelvod.com',443);source.proxy=False;source.tls=None;source.denied=False;source.proxy=False
         connection=Mock();connection.getresponse.return_value=Mock(status=403,headers={});source.connection=connection
         with patch.object(m.http.client,'HTTPSConnection') as factory:
             for _ in range(2):
@@ -107,7 +107,7 @@ class Tests(unittest.TestCase):
             self.assertEqual(second.request.call_args.kwargs['headers']['Range'],'bytes=0-63')
     def test_proxy_redirect_errors_have_same_categories_without_retry(self):
         for headers,expected in [({},'media_redirect_missing_location'),({'Location':'https://fixture.qznovelvod.com/a'},'media_redirect_limit')]:
-            source=m.Source.__new__(m.Source);source.denied=False
+            source=m.Source.__new__(m.Source);source.denied=False;source.proxy=False;source.url='https://fixture.qznovelvod.com/a'
             with patch.object(source,'fetch_range',side_effect=urllib.error.HTTPError('https://fixture.qznovelvod.com/a',302,'fixture',headers,None)) as fetch:
                 with self.assertRaisesRegex(ValueError,expected):source.fetch(0,1)
                 self.assertEqual(fetch.call_count,1)
@@ -164,7 +164,7 @@ class Tests(unittest.TestCase):
         data=bytearray(data);at=data.index(b'stco');data[at+12:at+16]=u32(len(data)+1)
         with self.assertRaises(ValueError):FakeSource(bytes(data),key)
     def test_403_is_not_retried_by_later_ranges(self):
-        source=m.Source.__new__(m.Source);source.url='https://fixture.qznovelvod.com/a';source.denied=False
+        source=m.Source.__new__(m.Source);source.url='https://fixture.qznovelvod.com/a';source.denied=False;source.proxy=False
         with patch.object(source,'open_range',side_effect=urllib.error.HTTPError('https://fixture.invalid',403,'blocked',{},None)) as open_range:
             for _ in range(2):
                 with self.assertRaisesRegex(ValueError,'media_access_denied'):source.fetch(0,31)

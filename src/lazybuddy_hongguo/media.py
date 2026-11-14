@@ -68,6 +68,11 @@ class Media:
         self.pump()
         if not self.browser:raise ValueError('media_not_loaded')
         if method!='playback.status' and (type(args.get('session')) is not int or args['session']!=self.generation):raise ValueError('media_not_loaded')
+        if method=='playback.report_error':
+            if type(args.get('code')) is not int or args['code'] not in (1,2,3,4):raise ValueError('media_request_failed')
+            from .diagnostics import record
+            record('browser_media_error',stage='browser',context={**self.metadata,'quality':self.arguments.get('quality')},browser_code=args['code'])
+            return self.state()
         if method=='playback.close':self.close(wait=False);return self.state()
         if method=='playback.status':return self.state()
         if method=='playback.checkpoint':
@@ -146,6 +151,8 @@ class Media:
             if generation!=self.generation:continue
             if result.get('ok') is not True:
                 self.error=code(ValueError(result.get('error')))
+                from .diagnostics import record
+                record(self.error,stage='stream' if self.resource else 'prepare',context={**self.metadata,'quality':self.arguments.get('quality')})
                 self.close(wait=False)
                 continue
             try:

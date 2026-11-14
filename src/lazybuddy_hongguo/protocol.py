@@ -35,6 +35,8 @@ class Service:
         identifier=supplied_id if isinstance(supplied_id,str) and len(supplied_id)<=128 else ''
 
         def error(code):
+            from .diagnostics import record
+            record(code,stage='api',context=request.get('args') if isinstance(request,dict) and isinstance(request.get('args'),dict) else None)
             return dict(version=VERSION, id=identifier, ok=False, error=dict(code=code))
 
         if not isinstance(request, dict) or set(request) - {'version', 'id', 'method', 'args'}:
@@ -68,6 +70,9 @@ class Service:
                         row['has_cover']=bool(cover)
                         if cover:self.covers[row['id']]=cover
                     if len(self.covers)>500:self.covers={row['id']:self.covers[row['id']] for row in reply['data']['items'] if row['id'] in self.covers}
+                if not reply.get('ok'):
+                    from .diagnostics import record
+                    record('search_failed',stage='search')
                 return reply
             except Exception:
                 return error('search_failed')
@@ -86,6 +91,7 @@ class Service:
             'media.pause': set(), 'media.seek': {'value'}, 'media.speed': {'value'}, 'media.boost':{'value'}, 'media.volume': {'value'},
             'media.mute': {'value'}, 'media.status': set(), 'media.close': set()}
         media_commands.update({'playback.open':{'series','episode','quality','origin'},'playback.status':set(),
+            'playback.report_error':{'session','code'},
             'playback.suspend':{'session'},'playback.resume':{'session'},'playback.close':{'session'},'playback.checkpoint':{'session','position','duration','final'}})
         if method in media_commands:
             if set(args) - media_commands[method]:
@@ -164,6 +170,9 @@ class Service:
                 data['history'] = {series:{key:row.get(key) for key in ('episode','time','updated')}
                                    for series,row in raw.get('history', {}).items()}
                 data.update({key:raw.get(key) for key in ('sync_state','sync_error')})
+            from .diagnostics import record
+            for field in ('error','favorites_error','sync_error'):
+                if data.get(field):record(data[field],stage='account')
             return dict(version=VERSION, id=identifier, ok=True, data=data)
         except Exception:
             return error('account_request_failed')

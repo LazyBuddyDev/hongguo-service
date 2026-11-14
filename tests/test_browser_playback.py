@@ -19,6 +19,14 @@ class Source:
 
 
 class BrowserPlayback(unittest.TestCase):
+    def test_browser_error_is_logged_without_rebuilding_resource(self):
+        media=Media(Mock(sync_error=None));media.browser=True;media.resource='fixture';media.metadata={'series':'123','episode':1};media.arguments={'quality':'720p'}
+        with patch('lazybuddy_hongguo.diagnostics.record') as log:
+            media.call('playback.report_error',dict(session=media.generation,code=4))
+            self.assertEqual(log.call_args.kwargs['browser_code'],4);self.assertEqual(media.resource,'fixture')
+            with self.assertRaises(ValueError):media.call('playback.report_error',dict(session=media.generation,code=99))
+            with self.assertRaises(ValueError):media.call('playback.report_error',dict(session=media.generation-1,code=4))
+            self.assertEqual(log.call_count,1)
     def test_old_service_session_cannot_close_a_restarted_service(self):
         account=Mock();account.sync_error=None
         with patch('lazybuddy_hongguo.media.secrets.randbelow',side_effect=[101,202]):

@@ -1,6 +1,7 @@
 """Fixed App media with offset-preserving sample processing and a bounded Range cache."""
 import re,urllib.request,urllib.parse,urllib.error,http.server,http.client,ssl,secrets,threading,bisect,collections
 from .media_container import boxes,only,uint,byte_range,Cipher,algorithms,modes
+from lazybuddy_hongguo.diagnostics import record
 
 def allowed(url):
     try:
@@ -8,23 +9,29 @@ def allowed(url):
         return u.scheme=='https' and u.hostname and u.hostname.endswith('.qznovelvod.com') and u.port in (None,443) and not u.username and not u.password and not u.fragment
     except ValueError:return False
 class Redirect(urllib.request.HTTPRedirectHandler):
+    def __init__(self,context=None):self.context=context
     def redirect_request(self,req,fp,code,msg,headers,url):
-        check_redirect(url)
+        check_redirect(url,context=self.context,status=code,source=req.full_url)
+        record('media_redirect',stage='redirect',context=self.context,status=code,source=req.full_url,target=url,mode='proxy')
         return super().redirect_request(req,fp,code,msg,headers,url)
 
-def check_redirect(url):
+def check_redirect(url,**details):
     if not allowed(url):
-        raise ValueError('media_redirect_https_required' if url.lower().startswith('http:') else 'media_redirect_target_rejected')
+        reason='media_redirect_https_required' if url.lower().startswith('http:') else 'media_redirect_target_rejected'
+        record(reason,stage='redirect',target=url,**details)
+        raise ValueError(reason)
 
 class Source:
+    context=None
     BLOCK=256*1024
     INITIAL=64*1024
-    def __init__(self,url,key):
+    def __init__(self,url,key,context=None):
         if not allowed(url) or (key is not None and len(key)!=16):raise ValueError('invalid_media_source')
         self.url,self.key=url,key;self.total=None;self.downloaded=0;self.requests=0;self.denied=False;self.error=None
+        self.context=context
         self.connection=None;self.origin=None;self.tls=ssl.create_default_context()
         self.proxy=bool(urllib.request.getproxies().get('https'))
-        self.opener=urllib.request.build_opener(Redirect(),urllib.request.HTTPSHandler(context=self.tls))
+        self.opener=urllib.request.build_opener(Redirect(context),urllib.request.HTTPSHandler(context=self.tls))
         self.lock=threading.Lock();self.cache=collections.OrderedDict();self.spans=[];self.tracks=set()
         prefix=self.fetch(0,self.INITIAL-1)
         top=[];pos=0
@@ -58,11 +65,14 @@ class Source:
         if self.denied:raise ValueError('media_access_denied')
         try:return self.fetch_range(start,end)
         except urllib.error.HTTPError as error:
+            record('media_http_error',stage='range',context=self.context,status=error.code,source=self.url,mode='proxy' if self.proxy else 'direct')
             if error.code in (401,403):self.denied=True;raise ValueError('media_access_denied') from None
             if error.code in (301,302,303,307,308):
                 raise ValueError('media_redirect_limit' if error.headers.get('Location') else 'media_redirect_missing_location') from None
             raise ValueError('media_http_error') from None
-        except (urllib.error.URLError,OSError,http.client.HTTPException):raise ValueError('media_network_error') from None
+        except (urllib.error.URLError,OSError,http.client.HTTPException) as error:
+            record('media_network_error',stage='range',context=self.context,source=self.url,mode='proxy' if self.proxy else 'direct',exception_type=type(getattr(error,'reason',error)).__name__)
+            raise ValueError('media_network_error') from None
     def fetch_range(self,start,end):
         request=urllib.request.Request(self.url,headers={'Range':f'bytes={start}-{end}','Accept-Encoding':'identity'})
         with self.open_range(request) as response:
@@ -79,8 +89,8 @@ class Source:
     def open_range(self,request):
         if self.proxy:return self.opener.open(request,timeout=8)
         url=request.full_url
-        for _ in range(6):
-            check_redirect(url)
+        for hop in range(6):
+            check_redirect(url,context=self.context,source=self.url,hop=hop,mode='direct')
             parsed=urllib.parse.urlsplit(url);origin=(parsed.hostname,parsed.port or 443)
             reused=self.connection is not None and self.origin==origin and self.connection.sock is not None
             if self.connection is None or self.origin!=origin:
@@ -98,12 +108,16 @@ class Source:
                 raise urllib.error.URLError('media_transport_failed') from None
             if response.status in (301,302,303,307,308):
                 location=response.headers.get('Location');response.close();self.connection.close();self.connection=None
-                if not location:raise ValueError('media_redirect_missing_location')
+                if not location:
+                    record('media_redirect_missing_location',stage='redirect',context=self.context,status=response.status,hop=hop,source=url,mode='direct')
+                    raise ValueError('media_redirect_missing_location')
+                record('media_redirect',stage='redirect',context=self.context,status=response.status,hop=hop,source=url,target=urllib.parse.urljoin(url,location),mode='direct')
                 url=urllib.parse.urljoin(url,location);continue
             if response.status>=400:
                 status,headers=response.status,response.headers;response.close();self.connection.close();self.connection=None
                 raise urllib.error.HTTPError(url,status,'media_rejected',headers,None)
             return response
+        record('media_redirect_limit',stage='redirect',context=self.context,source=self.url,target=url,hop=6,mode='direct')
         raise ValueError('media_redirect_limit')
     def track(self,start,end,mdats):
         data=self.moov
