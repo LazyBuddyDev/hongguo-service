@@ -43,13 +43,14 @@ class Source:
 class Fixture(Media):
     def __init__(self,account):super().__init__(account);self.server=self.worker=None
     def open(self,args,browser=False):
-        if not browser or args.get('series')!='123' or args.get('episode')!=1 or args.get('origin')!='http://tauri.localhost':raise ValueError('media_request_failed')
+        if not browser or args.get('series') not in ('123','124') or args.get('episode')!=1 or args.get('origin')!='http://tauri.localhost':raise ValueError('media_request_failed')
+        if args.get('quality') not in ('360p','480p','720p','1080p'):raise ValueError('invalid_quality')
         self.close(wait=False)
         data=Path(os.environ['LAZYBUDDY_BROWSER_FIXTURE_FILE']).read_bytes()
         if not 0<len(data)<=8*1024*1024:raise ValueError('media_request_failed')
         self.server=Server(Source(data),origin=args['origin']);self.worker=threading.Thread(target=self.server.serve);self.worker.start()
         self.browser=True;self.suspended=False;self.resource=self.server.address
-        self.metadata=dict(series='123',episode=1,episodes=[1],width=640,height=360,available_qualities=['720p'])
+        self.metadata=dict(series=args['series'],episode=1,episodes=[1],width=640,height=360,available_qualities=[360,720,1080])
         return self.state()
     def close(self,wait=True):
         if self.server:
@@ -57,7 +58,7 @@ class Fixture(Media):
         return super().close(wait)
 
 def main():
-    def search(request):return dict(version=1,id=request['id'],ok=True,data=dict(items=[dict(id='123',title='测试短剧',episodes=1)],page=1,has_more=False))
+    def search(request):return dict(version=1,id=request['id'],ok=True,data=dict(items=[dict(id='123',title='测试短剧',episodes=1),dict(id='124',title='另一部短剧',episodes=1)],page=1,has_more=False))
     service = Service(Account,search_factory=search,media_factory=Fixture)
     try:
         for line in sys.stdin.buffer:
