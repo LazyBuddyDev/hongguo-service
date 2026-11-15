@@ -8,8 +8,10 @@ import (
 	"github.com/beilunyang/openhongguo/sdk"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTrip func(*http.Request) (*http.Response, error)
@@ -25,6 +27,17 @@ func TestPlayerRequestUsesSameDeviceAndExactEpisode(t *testing.T) {
 			q := r.URL.Query()
 			if r.Method != "GET" || r.URL.Host != "api5-normal-sinfonlineb.fqnovel.com" || r.URL.Path != "/reading/bookapi/video_tab/multi_video_model/v1/" || q.Get("video_id") != "12347" || q.Get("device_id") != "12345" || q.Get("iid") != "12346" || q.Get("video_platform") != "1024" || q.Get("ts") != "" {
 				t.Fatal("request changed device, episode or route")
+			}
+
+			expected := map[string]string{"video_id_type": "0", "device_level": "1", "need_all_video_definition": "1", "need_mp4_align": "0", "use_os_player": "0", "video_platform": "1024", "source": "0", "from_video_id": "", "version_code": "73932", "version_name": "7.3.9.32"}
+			for key, value := range expected {
+				if q.Get(key) != value || len(q[key]) != 1 {
+					t.Fatal("player business fields differ from pinned reference")
+				}
+			}
+			ticket, err := strconv.ParseInt(q.Get("_rticket"), 10, 64)
+			if err != nil || r.Header.Get("x-ss-req-ticket") != q.Get("_rticket") || r.Header.Get("x-khronos") != strconv.FormatInt(ticket/1000, 10) {
+				t.Fatal("query and signature clocks differ")
 			}
 			for _, key := range []string{"x-gorgon", "x-helios", "x-medusa", "x-tt-dt"} {
 				if r.Header.Get(key) != "" {
@@ -145,5 +158,60 @@ func TestFavoriteBodyTargetsOnlyOneStringIDAndExplicitOperation(t *testing.T) {
 	}
 	if _, err := favoriteBody("https://outside", true, 1); err == nil {
 		t.Fatal("invalid ID accepted")
+	}
+}
+
+type failedBody struct{}
+
+func (failedBody) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+func (failedBody) Close() error             { return nil }
+func TestEmptyBodyDiagnosticDistinguishesReadFailure(t *testing.T) {
+	for _, broken := range []bool{false, true} {
+		var body io.ReadCloser = io.NopCloser(strings.NewReader(""))
+		if broken {
+			body = failedBody{}
+		}
+		wire := &transport{client: &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: body}, nil
+		})}}
+		_, err := wire.Do(context.Background(), &sdk.Request{Method: "GET", URL: "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/"})
+		if wire.status != 200 || wire.bytes != 0 || wire.readOK == broken || (err != nil) != broken {
+			t.Fatal("empty response diagnostic lost read status")
+		}
+	}
+}
+
+func TestResponseMetadataNeverCopiesSecretHeaders(t *testing.T) {
+	response := &http.Response{Proto: "HTTP/2.0", ContentLength: 0, Uncompressed: true, Header: http.Header{
+		"Content-Type": []string{"application/json; token=SECRET"}, "Content-Encoding": []string{"SECRET"}, "Set-Cookie": []string{"SECRET"}, "Location": []string{"https://SECRET.invalid/path?token=SECRET"}, "X-Request-Id": []string{"SECRET"}, "Date": []string{time.Now().Add(-2 * time.Minute).UTC().Format(http.TimeFormat)}, "X-Arbitrary": []string{"SECRET"}}}
+	value := responseMetadata(response)
+	raw, _ := json.Marshal(value)
+	if strings.Contains(string(raw), "SECRET") || value["content_type"] != "application/json" || value["content_encoding"] != "other" || value["declared_length"] != int64(0) || value["request_id_present"] != true || value["location_present"] != true {
+		t.Fatal("response diagnostic leaked data or lost safe fields")
+	}
+	delta := value["date_delta_seconds"].(int64)
+	if delta < 119 || delta > 122 {
+		t.Fatal("server clock difference lost")
+	}
+}
+
+func TestPlayerCookiesHaveOneValueAndKeepDeviceSession(t *testing.T) {
+	wire := &transport{cookies: map[string]string{"passport_csrf_token": "fixture-account", "sessionid": "fixture-session"}, client: &http.Client{Transport: roundTrip(func(request *http.Request) (*http.Response, error) {
+		counts := map[string]int{}
+		values := map[string]string{}
+		for _, cookie := range request.Cookies() {
+			counts[cookie.Name]++
+			values[cookie.Name] = cookie.Value
+		}
+		for name, value := range map[string]string{"passport_csrf_token": "fixture-account", "sessionid": "fixture-session", "install_id": "123", "ttreq": "fixture-device"} {
+			if counts[name] != 1 || values[name] != value {
+				t.Fatal("account cookie shadowed or device session lost")
+			}
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})}}
+	_, err := wire.Do(context.Background(), &sdk.Request{Method: "GET", URL: "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/", Headers: map[string]string{"Cookie": "passport_csrf_token=; passport_csrf_token_default=; install_id=123; ttreq=fixture-device"}})
+	if err != nil {
+		t.Fatal("fixture transport failed")
 	}
 }

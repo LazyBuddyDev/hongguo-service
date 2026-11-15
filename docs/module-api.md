@@ -39,3 +39,11 @@ stdin每行一个UTF-8请求，如`{"version":1,"id":"h1","method":"health","arg
 Web消费者使用[浏览器播放资源API](browser-playback.md)：`playback.open/status/report_error/suspend/resume/checkpoint/close`。健康能力`browser_resources`和`credential_scopes`表明对应协议可用，不等于某部剧有权播放或已经成功解码。
 
 独立服务仍保留可选`media.*`原生解码能力，见[可选原生媒体运行时](media-runtime.md)；当前Web宿主不使用，默认包不依赖该运行时。不要混合两条呈现路径的验收结果。
+
+## 封面缓存
+
+0.2.8起，cover.read在确认该剧已有受控来源后复用`LAZYBUDDY_DATA_DIR/cache/covers`中的解码图片。文件名为完整来源字符串的SHA256，不保存URL/签名参数，文件只含宽高及有界RGBA；最多64张、7天有效，来源变化产生新键，损坏或过期重新获取。写入原子替换、短锁保护轮转，缓存故障不阻断已成功获得的封面。前端另有按当前账号展示生命周期隔离的64张内存缓存，退出/重新登录清空，不在隐藏时续取。
+
+## 结构化失败诊断
+
+0.2.11起服务只返回诊断而不记录日志。同步失败可带`error.diagnostic`；异步取源失败在`playback.status`的`data.diagnostic`保留同一诊断。仅包含白名单上下文/HTTP元数据/有界栈位置，不携带原始异常文本、请求地址或秘密。调用方自行决定日志路径、格式及生命周期，服务没有宿主日志目录配置。

@@ -823,6 +823,8 @@ func parsePlayback(raw []byte, episodeID, quality string) (*model.Playback, erro
 		wanted, _ := strconv.Atoi(strings.TrimSuffix(quality, "p"))
 		var selected *playbackItem
 		selectedSize := 0
+		var lower *playbackItem
+		lowerSize := 0
 		for i := range items {
 			candidate := items[i].stream()
 			matches := strings.EqualFold(candidate.Definition, quality) || strings.EqualFold(candidate.Quality, quality)
@@ -853,12 +855,19 @@ func parsePlayback(raw []byte, episodeID, quality string) (*model.Playback, erro
 				}
 			}
 			if !matches {
+				if size > 0 && size < wanted && (lower == nil || size > lowerSize || (size == lowerSize && candidate.Bitrate < lower.stream().Bitrate)) {
+					lower, lowerSize = &items[i], size
+				}
 				continue
 			}
 			if selected == nil || size < selectedSize || (size == selectedSize && candidate.Bitrate < selected.stream().Bitrate) {
 				selected = &items[i]
 				selectedSize = size
 			}
+		}
+		// A saved preference must not prevent playback of an episode with lower available quality.
+		if selected == nil {
+			selected, selectedSize = lower, lowerSize
 		}
 		if selected == nil {
 			return nil, fmt.Errorf("quality_unavailable")

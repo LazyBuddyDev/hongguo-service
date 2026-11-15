@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -45,12 +46,14 @@ type request struct {
 	Catalog  []episode          `json:"catalog"`
 }
 type transport struct {
-	client  *http.Client
-	cookies map[string]string
-	denied  bool
-	stage   string
-	status  int
-	bytes   int
+	client       *http.Client
+	cookies      map[string]string
+	denied       bool
+	stage        string
+	status       int
+	bytes        int
+	readOK       bool
+	responseMeta map[string]any
 }
 
 func (t *transport) Do(ctx context.Context, r *sdk.Request) (*sdk.Response, error) {
@@ -64,7 +67,8 @@ func (t *transport) Do(ctx context.Context, r *sdk.Request) (*sdk.Response, erro
 	if !api && !registration && !player {
 		return nil, errors.New("endpoint_rejected")
 	}
-	t.status, t.bytes = 0, 0
+	t.status, t.bytes, t.readOK = 0, 0, false
+	t.responseMeta = nil
 	switch u.Path {
 	case "/service/2/device_register/":
 		t.stage = "registration"
@@ -83,8 +87,22 @@ func (t *transport) Do(ctx context.Context, r *sdk.Request) (*sdk.Response, erro
 		req.Header.Set(k, v)
 	}
 	if api || player {
-		for k, v := range t.cookies {
-			req.AddCookie(&http.Cookie{Name: k, Value: v})
+		// Replace SDK placeholders by name; appending can send an empty CSRF cookie first.
+		merged := map[string]string{}
+		for _, cookie := range req.Cookies() {
+			merged[cookie.Name] = cookie.Value
+		}
+		for name, value := range t.cookies {
+			merged[name] = value
+		}
+		req.Header.Del("Cookie")
+		names := make([]string, 0, len(merged))
+		for name := range merged {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			req.AddCookie(&http.Cookie{Name: name, Value: merged[name]})
 		}
 	}
 	response, err := t.client.Do(req)
@@ -92,11 +110,12 @@ func (t *transport) Do(ctx context.Context, r *sdk.Request) (*sdk.Response, erro
 		return nil, errors.New("transport_failed")
 	}
 	defer response.Body.Close()
+	t.responseMeta = responseMetadata(response)
 	if response.StatusCode == 403 {
 		t.denied = true
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
-	t.status, t.bytes = response.StatusCode, len(body)
+	t.status, t.bytes, t.readOK = response.StatusCode, len(body), err == nil
 	if err != nil || len(body) > 8<<20 {
 		return nil, errors.New("response_invalid")
 	}
@@ -112,6 +131,38 @@ func (t *transport) Do(ctx context.Context, r *sdk.Request) (*sdk.Response, erro
 		cookies[c.Name] = c.Value
 	}
 	return &sdk.Response{StatusCode: response.StatusCode, Headers: headers, Cookies: cookies, Body: body}, nil
+}
+
+// Only categories/numbers/booleans leave the helper; never copy arbitrary header values.
+func responseMetadata(response *http.Response) map[string]any {
+	category := func(value string, allowed ...string) string {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			return "absent"
+		}
+		for _, candidate := range allowed {
+			if value == candidate {
+				return value
+			}
+		}
+		return "other"
+	}
+	contentType := strings.SplitN(response.Header.Get("Content-Type"), ";", 2)[0]
+	protocol := category(response.Proto, "http/1.0", "http/1.1", "http/2.0", "http/3.0")
+	transfer := "absent"
+	if len(response.TransferEncoding) > 0 {
+		transfer = category(strings.Join(response.TransferEncoding, ","), "chunked", "identity")
+	}
+	result := map[string]any{"http_version": protocol, "content_type": category(contentType, "application/json", "application/x-protobuf", "text/html", "application/octet-stream"),
+		"content_encoding": category(response.Header.Get("Content-Encoding"), "gzip", "br", "deflate", "identity"), "declared_length": response.ContentLength,
+		"uncompressed": response.Uncompressed, "transfer_encoding": transfer, "request_id_present": response.Header.Get("X-Tt-Logid") != "" || response.Header.Get("X-Request-Id") != "", "location_present": response.Header.Get("Location") != ""}
+	if stamp, err := http.ParseTime(response.Header.Get("Date")); err == nil {
+		delta := int64(time.Since(stamp) / time.Second)
+		if delta >= -31536000 && delta <= 31536000 {
+			result["date_delta_seconds"] = delta
+		}
+	}
+	return result
 }
 
 var id = regexp.MustCompile(`^[1-9][0-9]{0,31}$`)
@@ -166,7 +217,7 @@ func resolve(input request) (result map[string]any, err error) {
 	wire := &transport{client: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, cookies: input.Cookies}
 	defer func() {
 		if err != nil {
-			result = map[string]any{"stage": wire.stage, "diagnostic": map[string]any{"stage": wire.stage, "http_status": wire.status, "body_bytes": wire.bytes}}
+			result = map[string]any{"stage": wire.stage, "diagnostic": map[string]any{"stage": wire.stage, "http_status": wire.status, "body_bytes": wire.bytes, "body_read_ok": wire.readOK, "response_meta": wire.responseMeta}}
 		}
 	}()
 	client, err := sdk.NewClient(sdk.Options{Transport: wire, ProfileStore: store, RetryAttempts: 1, DeviceResets: sdk.Int(0)})

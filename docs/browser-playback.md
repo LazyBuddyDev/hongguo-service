@@ -15,7 +15,7 @@
 | `playback.checkpoint` | `session`、秒数`position/duration`、可选布尔`final` | 保存真实观看断点，final请求提交 |
 | `playback.close` | 整数`session` | 释放资源与输入进程，收尾已有进度事务 |
 
-准备完成时返回`prepared: true`、`resource: {url, mime: "video/mp4"}`、`session`、`suspended`，以及脱敏错误、进度、分集与清晰度字段。`available_qualities`是数字数组（如`[360,720,1080]`），请求`quality`使用带p字符串（如`"720p"`），客户端在边界转换，不把旧集档位照搬给新集。档位来自当前集实际兼容结果。
+准备完成时返回`prepared: true`、`resource: {url, mime: "video/mp4"}`、`session`、`suspended`，以及脱敏错误、进度、分集与清晰度字段。`available_qualities`是数字数组（如`[360,720,1080]`），请求`quality`使用带p字符串（如`"720p"`），客户端在边界转换，不把旧集档位照搬给新集。档位来自当前集实际兼容结果。0.2.12起，保存的清晰度是偏好：优先选择达到偏好的最近兼容档位；若当前集最高兼容档位低于偏好，则从同一响应选择最高兼容档位，不额外重试请求。客户端显示实际视频尺寸对应的清晰度，保留用户偏好供后续剧集使用。
 
 接受open不代表浏览器已解码。仅当前可见页面轮询准备状态；用`loadedmetadata`、实际尺寸、帧回调`mediaTime`、媒体error与真实EOS反馈播放。请求seek目标、滑块预览或服务声明时长不能代替已观看帧时间。
 
@@ -41,7 +41,7 @@ URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不�
 
 `app_playback_empty_response`只表示播放模型阶段HTTP200但正文为空，此时尚无浏览器资源，不能靠更换解码器解决。目录成功、手机可播或网站已登录均不能证明桌面App取源权限；网络、身份和请求兼容原因需日志证据，不猜测为账号拒绝。偶发真实网络问题的当前结论与下一步只在TASKS维护。
 
-设置`LAZYBUDDY_DATA_DIR`后，`logs/media.log`保存JSONL，单份128KiB、两个轮转备份，跨进程短锁保护。记录UTC时间、PID、阶段、剧/集、清晰度、direct/system、HTTP状态、跳转序号、来源/目标主机、异常类型和有限栈文件/函数/行号。错误码供界面快速定位，底部显示可理解的上下文；准确排查以脱敏日志为准。
+0.2.11起服务不写日志，不接收宿主日志路径；`diagnostics.py`只构造有界、脱敏的API诊断。同步错误通过`error.diagnostic`返回；私有取源子进程的失败诊断经媒体状态透传为`data.diagnostic`，调用方决定是否记录。字段含阶段、剧/集、清晰度、连接模式、HTTP状态/字节/读取结果及有限代码位置。服务不感知调用方是不是桌面宿主，普通CLI调用同样只收到结构化结果。
 
 不写完整URL、查询参数、响应正文、原始异常文本、局部变量、账号材料或媒体能力。记录失败不能破坏播放，日志不是新网络请求或自动重连依据。
 
@@ -58,3 +58,11 @@ python -B scripts/verify/stage-browser-fixture.py --runtime-packages target/pack
 输入目录须含已独立生成并解包的`python-runtime/`运行时包；输出须是未存在的暂存目录。外部宿主显式设置`LAZYBUDDY_BROWSER_FIXTURE_FILE`指向自制4秒以上、最多8MB的MP4，目录按统一规范放`tmp/fixtures/media`，隔离配置和报告也归tmp。fixture不能发布为正式模块，也不能给生产入口增加任意账号或URL覆盖。
 
 实际WebView验证应分开确认二维码取消、收藏反馈、真实帧推进/seek、隐藏停止读取、恢复暂停、切页失效旧资源及退出收尾。合成H.264/H.265/AAC成功不代表上游节目权限、真实音频质量或节目音画同步，单元成功也不替代这些验收。
+
+### 空响应与有限响应头诊断
+
+0.2.10的取源失败诊断在`response_meta`中仅保留白名单：HTTP版本枚举、Content-Type类别（去参数）、Content-Encoding类别、声明长度、Go自动解压布尔值、Transfer-Encoding类别、服务端Date与本机的秒差，以及请求ID/Location头是否存在的布尔值。未知文本只记other，不记录任意响应头原文、Set-Cookie、请求ID值、Location地址或响应正文。Python诊断构造端再次校验枚举、数值范围和类型。自动解压时Go可能移除原Content-Length/Content-Encoding，需结合uncompressed解释，不能将读取后的字节数冒充原始线路字节数。
+
+请求核对使用vendor/openhongguo/BRIEFDOCK.md所列固定版本第三方参考（不是官方API规范）：GET路径、业务字段、应用版本73932，以及query的_rticket与签名头时间同源。当前未确认服务端实时验签/放行要求。未引入参考中的身份轮换、跨主机回退或自动重试。发现SDK空CSRF占位与账号Cookie直接追加会重名，现按Cookie名称合并，账号值覆盖同名占位，保留现有设备的install_id/ttreq；这修复了请求构造风险，但尚无真实请求证据证明它是原200空体的根因。
+
+收藏封面自0.2.13起按剧ID的哈希读取有界像素缓存，服务重建丢失来源表时仍可返回已缓存图片；未缓存或过期/损坏的图片且无已验证来源时返回cover_unavailable，不新增来源查询或自动刷新收藏。搜索封面沿用已有来源缓存，接口不暴露封面地址。

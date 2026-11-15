@@ -34,10 +34,10 @@ class Service:
         supplied_id=request.get('id','') if isinstance(request,dict) else ''
         identifier=supplied_id if isinstance(supplied_id,str) and len(supplied_id)<=128 else ''
 
-        def error(code):
-            from .diagnostics import record
-            record(code,stage='api',context=request.get('args') if isinstance(request,dict) and isinstance(request.get('args'),dict) else None)
-            return dict(version=VERSION, id=identifier, ok=False, error=dict(code=code))
+        def error(code,exception=None):
+            from .diagnostics import describe
+            detail=describe(code,stage='api',context=request.get('args') if isinstance(request,dict) and isinstance(request.get('args'),dict) else None,exception=exception)
+            return dict(version=VERSION, id=identifier, ok=False, error=dict(code=code,diagnostic=detail))
 
         if not isinstance(request, dict) or set(request) - {'version', 'id', 'method', 'args'}:
             return error('invalid_request')
@@ -71,17 +71,23 @@ class Service:
                         if cover:self.covers[row['id']]=cover
                     if len(self.covers)>500:self.covers={row['id']:self.covers[row['id']] for row in reply['data']['items'] if row['id'] in self.covers}
                 if not reply.get('ok'):
-                    from .diagnostics import record
-                    record('search_failed',stage='search')
+                    from .diagnostics import describe
+                    reply.setdefault('error',{})['diagnostic']=describe('search_failed',stage='search')
                 return reply
             except Exception:
                 return error('search_failed')
         if method == 'cover.read':
-            if set(args)!={'series'} or not isinstance(args['series'],str) or args['series'] not in self.covers:
+            if set(args)!={'series'} or not isinstance(args['series'],str):
                 return error('cover_unavailable')
             try:
-                from .covers import read
-                return dict(version=VERSION,id=identifier,ok=True,data=dict(series=args['series'],**read(self.covers[args['series']])))
+                from .covers import read,read_cached
+                series=args['series']
+                if series not in self.covers:
+                    pixels=read_cached(series)
+                else:
+                    favorite=any(row.get('id')==series for row in self.last_account.get('favorites',[]))
+                    pixels=read(self.covers[series],series=series) if favorite else read(self.covers[series])
+                return dict(version=VERSION,id=identifier,ok=True,data=dict(series=series,**pixels))
             except Exception:
                 return error('cover_unavailable')
         commands = {'account.status': 'status', 'account.restore': 'restore', 'account.login': 'login',
@@ -170,9 +176,9 @@ class Service:
                 data['history'] = {series:{key:row.get(key) for key in ('episode','time','updated')}
                                    for series,row in raw.get('history', {}).items()}
                 data.update({key:raw.get(key) for key in ('sync_state','sync_error')})
-            from .diagnostics import record
+            from .diagnostics import describe
             for field in ('error','favorites_error','sync_error'):
-                if data.get(field):record(data[field],stage='account')
+                if data.get(field):data['diagnostic']=describe(data[field],stage='account')
             return dict(version=VERSION, id=identifier, ok=True, data=data)
-        except Exception:
-            return error('account_request_failed')
+        except Exception as exception:
+            return error('account_request_failed',exception)

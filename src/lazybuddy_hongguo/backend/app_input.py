@@ -32,13 +32,21 @@ def resolve(series,episode,quality,session,passport,on_error=None,origin=None):
         code=value.get('error')
         diagnostic=value.get('diagnostic')
         if code=='app_playback_unavailable' and isinstance(diagnostic,dict) and diagnostic.get('stage')=='playback' and diagnostic.get('http_status')==200 and diagnostic.get('body_bytes')==0:
-            raise ValueError('app_playback_empty_response')
-        raise ValueError(code if code in {'app_access_denied','app_media_unavailable','app_registration_unavailable','app_catalog_unavailable','app_playback_unavailable','app_source_unavailable','episode_unavailable','quality_unavailable','unsupported_wrapped_material','unsupported_media_layout','media_source_rejected','playback_episode_mismatch','app_rate_limited','app_source_network_error'} else 'app_source_unavailable')
+            code='app_source_network_error' if diagnostic.get('body_read_ok') is False else 'app_playback_empty_response'
+            from lazybuddy_hongguo.diagnostics import describe
+            detail=describe(code,stage='playback',context=dict(series=series,episode=episode,quality=quality),status=200,body_bytes=0,body_read_ok=diagnostic.get('body_read_ok'),response_meta=diagnostic.get('response_meta'))
+            failure=ValueError(code);failure.diagnostic=detail;raise failure
+        if isinstance(diagnostic,dict) and diagnostic.get('stage') in ('playback','catalog','registration'):
+            from lazybuddy_hongguo.diagnostics import describe
+            detail=describe(code,stage=diagnostic['stage'],context=dict(series=series,episode=episode,quality=quality),status=diagnostic.get('http_status'),body_bytes=diagnostic.get('body_bytes'),body_read_ok=diagnostic.get('body_read_ok'),response_meta=diagnostic.get('response_meta'))
+        failure=ValueError(code if code in {'app_access_denied','app_media_unavailable','app_registration_unavailable','app_catalog_unavailable','app_playback_unavailable','app_source_unavailable','episode_unavailable','quality_unavailable','unsupported_wrapped_material','unsupported_media_layout','media_source_rejected','playback_episode_mismatch','app_rate_limited','app_source_network_error'} else 'app_source_unavailable')
+        if isinstance(diagnostic,dict) and diagnostic.get('stage') in ('playback','catalog','registration'):failure.diagnostic=detail
+        raise failure
     resolve_ms=round((time.monotonic()-began)*1000)
     try:key=bytes.fromhex(value['key']) if value['key'] else None
     except (ValueError,TypeError,KeyError):raise ValueError('unsupported_wrapped_material') from None
     width,height=value.get('width'),value.get('height')
-    if any(not isinstance(v,int) or isinstance(v,bool) or not 0<v<=16384 for v in (width,height)) or min(width,height)<int(quality[:-1]):raise ValueError('quality_resolution_not_met')
+    if any(not isinstance(v,int) or isinstance(v,bool) or not 0<v<=16384 for v in (width,height)):raise ValueError('quality_resolution_not_met')
     def verify_identity():
         started=time.monotonic()
         if account.confirm('')!=saved['uid']:raise ValueError('saved_session_verification_failed')

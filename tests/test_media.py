@@ -68,3 +68,14 @@ class Tests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class DiagnosticRelay(unittest.TestCase):
+    def test_async_input_failure_survives_in_api_state(self):
+        from types import SimpleNamespace
+        from lazybuddy_hongguo.media import Media
+        media=Media(SimpleNamespace(sync_error=None));media.browser=True;media.loading=True
+        detail={'stage':'playback','http_status':200,'body_bytes':0,'body_read_ok':True}
+        media.events.put((media.generation,{'ok':False,'error':'app_playback_empty_response','diagnostic':detail}))
+        media.pump();state=media.state()
+        self.assertEqual(state['diagnostic'],detail);self.assertEqual(state['error'],'app_playback_empty_response');self.assertFalse(state['loading'])
+        media.close(wait=False)

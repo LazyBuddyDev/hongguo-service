@@ -10,7 +10,7 @@ import urllib.error
 ROOT=Path(__file__).resolve().parent
 sys.path[:0]=[str(ROOT),str(ROOT.parents[1]),str(ROOT.parents[1]/'packages')]
 from lazybuddy_hongguo.errors import code
-from lazybuddy_hongguo.diagnostics import record
+from lazybuddy_hongguo.diagnostics import describe
 
 
 def main():
@@ -26,21 +26,20 @@ def main():
         from lazybuddy_hongguo.backend import passport
         from lazybuddy_hongguo.backend.app_input import resolve
         def failure(error):
-            record(code(error),stage='stream',context=request,exception=error)
-            print(json.dumps(dict(ok=False,error=code(error))),flush=True)
+            print(json.dumps(dict(ok=False,error=code(error),diagnostic=getattr(error,'diagnostic',describe(code(error),stage='stream',context=request,exception=error)))),flush=True)
         result,server=resolve(request.get('series'),request.get('episode'),request.get('quality'),request.get('resolver'),passport.Passport,failure,origin=request.get('origin'))
         print(json.dumps(result,separators=(',',':')),flush=True)
         server.serve()
         return 0
     except urllib.error.HTTPError as error:
         reply=dict(ok=False,error='media_access_denied' if error.code in (401,403) else 'media_http_error')
-        record(reply['error'],stage='prepare',context=request if isinstance(request,dict) else None,status=error.code,exception=error)
+        reply['diagnostic']=describe(reply['error'],stage='prepare',context=request if isinstance(request,dict) else None,status=error.code,exception=error)
     except (urllib.error.URLError,TimeoutError) as error:
         reply=dict(ok=False,error='media_network_error')
-        record(reply['error'],stage='prepare',context=request if isinstance(request,dict) else None,exception=error)
+        reply['diagnostic']=getattr(error,'diagnostic',describe(reply['error'],stage='prepare',context=request if isinstance(request,dict) else None,exception=error))
     except Exception as error:
         reply=dict(ok=False,error=code(error))
-        record(reply['error'],stage='prepare',context=request if isinstance(request,dict) else None,exception=error)
+        reply['diagnostic']=getattr(error,'diagnostic',describe(reply['error'],stage='prepare',context=request if isinstance(request,dict) else None,exception=error))
     finally:
         if server:server.close()
     print(json.dumps(reply),flush=True)

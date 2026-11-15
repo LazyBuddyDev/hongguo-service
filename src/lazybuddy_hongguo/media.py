@@ -29,6 +29,7 @@ class Media:
         self.arguments={}
         self.loading=False
         self.error=None
+        self.diagnostic=None
         self.local_error=None
         self.pending_play=False
         self.recorded=None
@@ -70,8 +71,8 @@ class Media:
         if method!='playback.status' and (type(args.get('session')) is not int or args['session']!=self.generation):raise ValueError('media_not_loaded')
         if method=='playback.report_error':
             if type(args.get('code')) is not int or args['code'] not in (1,2,3,4):raise ValueError('media_request_failed')
-            from .diagnostics import record
-            record('browser_media_error',stage='browser',context={**self.metadata,'quality':self.arguments.get('quality')},browser_code=args['code'])
+            from .diagnostics import describe
+            self.diagnostic=describe('browser_media_error',stage='browser',context={**self.metadata,'quality':self.arguments.get('quality')},browser_code=args['code'])
             return self.state()
         if method=='playback.close':self.close(wait=False);return self.state()
         if method=='playback.status':return self.state()
@@ -118,7 +119,7 @@ class Media:
         if self.metadata.get('series')!=series:self.metadata={}
         self.metadata.update(series=series,episode=episode)
         self.arguments=args.copy()
-        self.error=None;self.loading=True
+        self.error=None;self.diagnostic=None;self.loading=True
         wire=(json.dumps(dict(series=series,episode=episode,quality=quality,resolver=self.resolver,**({'origin':origin} if browser else {})),separators=(',',':'))+'\n').encode()
         if len(wire)>65536:self.loading=False;raise ValueError('resolver_session_too_large')
         try:
@@ -151,8 +152,7 @@ class Media:
             if generation!=self.generation:continue
             if result.get('ok') is not True:
                 self.error=code(ValueError(result.get('error')))
-                from .diagnostics import record
-                record(self.error,stage='stream' if self.resource else 'prepare',context={**self.metadata,'quality':self.arguments.get('quality')})
+                self.diagnostic=result.get('diagnostic')
                 self.close(wait=False)
                 continue
             try:
@@ -191,7 +191,7 @@ class Media:
 
     def state(self):
         if self.browser:return dict(self.metadata,loading=self.loading,prepared=self.resource is not None,session=self.generation,
-                resource=dict(url=self.resource,mime='video/mp4') if self.resource else None,suspended=self.suspended,error=self.error,
+                resource=dict(url=self.resource,mime='video/mp4') if self.resource else None,suspended=self.suspended,error=self.error,diagnostic=self.diagnostic,
                 progress_error=self.local_error or self.account.sync_error,progress_pending=self.flush_thread is not None)
         try:
             state=self.request('status',{}) if self.process is not None else dict(loaded=False,playing=False,eos=False,position=0,duration=0)

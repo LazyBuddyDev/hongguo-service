@@ -109,6 +109,7 @@ class Tests(unittest.TestCase):
         for error,diagnostic,expected in [
             ('app_playback_unavailable',dict(stage='playback',http_status=200,body_bytes=0),'app_playback_empty_response'),
             ('app_playback_unavailable',dict(stage='playback',http_status=200,body_bytes=20),'app_playback_unavailable'),
+            ('app_playback_unavailable',dict(stage='playback',http_status=200,body_bytes=0,body_read_ok=False),'app_source_network_error'),
             ('app_access_denied',dict(stage='playback',http_status=403,body_bytes=0),'app_access_denied'),
         ]:
             reply=Mock(returncode=1,stdout=json.dumps(dict(ok=False,error=error,diagnostic=diagnostic)).encode())
@@ -137,7 +138,9 @@ class Tests(unittest.TestCase):
                        profile=PROFILE, catalog=[dict(number=222, playable=True)])
             with patch.object(c, 'read_device', return_value=PROFILE), patch.object(c, 'remember_device'), patch.object(media.pathlib.Path, 'is_file', return_value=True), patch.object(media.subprocess, 'run', return_value=Mock(returncode=0, stdout=json.dumps(reply).encode())), patch.object(media, 'Source', side_effect=source), patch.object(media, 'Server') as server:
                 if verified:
-                    media.resolve('12345', 222, '720p', {}, passport)
+                    result,_=media.resolve('12345', 222, '1080p', {}, passport)
+                    self.assertEqual((result['width'],result['height']),(1280,720))
+                    self.assertEqual(result['requested_quality'],'1080p')
                     server.assert_called_once()
                 else:
                     with self.assertRaisesRegex(ValueError, 'saved_session_verification_failed'):

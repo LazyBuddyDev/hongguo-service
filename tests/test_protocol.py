@@ -98,6 +98,28 @@ class ProtocolTests(unittest.TestCase):
                         dict(version=1, id='one', method='favorites.set', args=dict(series='../', favorite=True))]:
             self.assertFalse(service.handle(request)['ok'])
 
+    def test_favorite_cover_survives_service_restart(self):
+        import os,tempfile
+        from unittest.mock import patch
+        from lazybuddy_hongguo import covers
+        class Account(Backend):
+            def call(self,request):
+                return dict(state='signed_in',favorites=[dict(id='123',title='fixture',cover='https://one.byteimg.com/image?signature=SECRET')])
+        request=dict(version=1,id='fixture',method='cover.read',args=dict(series='123'))
+        with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,LAZYBUDDY_DATA_DIR=directory),patch.object(covers,'_download',return_value=dict(width=1,height=1,rgba='/wAA/w==')) as download:
+            first=Service(Account)
+            first.handle(dict(version=1,id='restore',method='account.restore'))
+            before=first.handle(request)
+            self.assertTrue(before['ok'])
+            restarted=Service(Account)
+            after=restarted.handle(request)
+            self.assertTrue(after['ok']);self.assertEqual(after['data'],before['data'])
+            self.assertEqual(download.call_count,1)
+            self.assertNotIn('SECRET',str(after))
+            request['args']['series']='456'
+            self.assertEqual(restarted.handle(request)['error']['code'],'cover_unavailable')
+            self.assertEqual(download.call_count,1)
+
     def test_search_projects_private_covers_before_reply(self):
         service=Service(Backend,lambda request:dict(version=1,id=request['id'],ok=True,data=dict(items=[dict(id='1',title='fixture',_cover='SECRET_URL')],page=1,has_more=False)))
         reply=service.handle(dict(version=1,id='search',method='search',args=dict(query='fixture')))
