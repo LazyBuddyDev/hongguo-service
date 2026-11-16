@@ -2,9 +2,13 @@
 
 ## LB-20261115-15 — App playback empty response
 
-Owner: Windows Codex. Updated:2026-11-16. Branch:main, source0cb3868. Published package:0.2.13 in modules-v1.0.0.
+Owner: Windows Codex. Updated:2026-11-16. Branch:main, source60aa873. Published package:0.2.13 in modules-v1.0.0. Current checkout: host target/service-exports/hongguo-service; do not remove this initialized repository as build output.
 - Current: empty body and read failure are separate; finite HTTP metadata and safe stack locations return through API diagnostics; service writes no logs. Quality fallback and favorite covers were confirmed working by the user and are independent of this error.
 - Host log21:24:14/21:24:16: series7689716417968491544 episode1 requested1080p/direct, HTTP200, declared_length0, body_bytes0, body_read_ok true, HTTP2, request ID present, Date delta0. Server reason remains unknown; duplicate CSRF cookie merging was corrected but causality is not proven.
+- Host1.0.3 real-account acceptance restored login and displayed 11 favorites, but two episode-6 playback attempts returned HTTP200 empty bodies. User confirms both episodes play normally in the official client and requires playback fixed before public release. Host source18771f9 is pushed, 1.0.3 assets remain a draft, stable feed/download page have not been deployed.
+- One bounded diagnostic on the original episode with the existing device/session again returned HTTP200, declared_length0, successful empty read, no redirect or cookie refresh. No identity rotation, credential writes or media access. Evidence:tmp/verification-playback/wire.json and report.md.
+- Vendored playback/shared signing sources match upstream bf8df22; upstream fixed SM3/Ladon/Argus vectors and focused resolver tests pass. Website Passport identity and the independently registered App playback device are distinct sessions. Upstream documents anonymous-device repeated playback returning empty responses; this is relevant evidence, not a proven cause or permission to rotate identities.
 - `[x]` Obtain verifiable protocol/session/signature evidence explaining the empty body and fix the cause or establish a documented upstream limitation.
 - `[x]` Verify the original failing item after the fix; success on another item does not establish permissions or root cause.
+- Next: obtain a supported account-bound playback contract or a verifiable upstream correction using the existing identity. No functional patch is established; do not ship diagnostics, label playback successful, or resume formal release before acceptance.
 - Package0.2.13 is public with host1.0.0; source CI and signed-catalog HTTPS install/health checks passed without real account access. The empty-response issue remains unverified and open. Do not rotate devices/accounts, expand endpoint trust or automatically retry.
