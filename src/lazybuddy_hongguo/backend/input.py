@@ -27,7 +27,7 @@ def main():
         from lazybuddy_hongguo.backend.app_input import resolve
         def failure(error):
             print(json.dumps(dict(ok=False,error=code(error),diagnostic=getattr(error,'diagnostic',describe(code(error),stage='stream',context=request,exception=error)))),flush=True)
-        result,server=resolve(request.get('series'),request.get('episode'),request.get('quality'),request.get('resolver'),passport.Passport,failure,origin=request.get('origin'))
+        result,server=resolve(request.get('series'),request.get('episode'),request.get('quality'),request.get('resolver'),passport.Passport,failure,origin=request.get('origin'),warmup=request.get('warmup') is True)
         print(json.dumps(result,separators=(',',':')),flush=True)
         server.serve()
         return 0

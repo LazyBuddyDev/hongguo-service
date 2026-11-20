@@ -32,6 +32,13 @@ class FakeSource(m.Source):
         value=self.data[start:end+1];self.total=len(self.data);self.downloaded+=len(value);self.requests+=1;return value
 
 class Tests(unittest.TestCase):
+    def test_warmup_is_bounded_and_reused_from_memory(self):
+        data,_,key,_=fixture(padding=3*1024*1024);source=FakeSource(data,key)
+        source.warmup();first=source.requests
+        self.assertLessEqual(source.downloaded,1024*1024)
+        source.warmup();self.assertEqual(source.requests,first)
+        self.assertLessEqual(source.stats()['cache_bytes'],1024*1024)
+
     def test_fetch_finishing_after_suspend_does_not_populate_cache(self):
         data,_,key,_=fixture(padding=1024*1024);source=FakeSource(data,key)
         before=dict(source.cache);cancelled=False;fetch=source.fetch

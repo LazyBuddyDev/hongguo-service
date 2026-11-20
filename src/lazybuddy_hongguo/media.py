@@ -41,6 +41,7 @@ class Media:
         self.resource=None
         self.suspended=False
         self.browser_final=None
+        self.next_media=None
 
     def call(self,method,args):
         if method.startswith('playback.'):return self.playback(method,args)
@@ -69,6 +70,8 @@ class Media:
         self.pump()
         if not self.browser:raise ValueError('media_not_loaded')
         if method!='playback.status' and (type(args.get('session')) is not int or args['session']!=self.generation):raise ValueError('media_not_loaded')
+        if method=='playback.prefetch':return self.prefetch()
+        if method=='playback.prefetch_cancel':self.cancel_prefetch(preserve_failure=True);return self.state()
         if method=='playback.report_error':
             if type(args.get('code')) is not int or args['code'] not in (1,2,3,4):raise ValueError('media_request_failed')
             from .diagnostics import describe
@@ -86,6 +89,7 @@ class Media:
                 self.browser_final=self.recorded;self.flush()
             return self.state()
         if method in ('playback.suspend','playback.resume'):
+            if method=='playback.suspend':self.cancel_prefetch(preserve_failure=True)
             if self.loading:self.close(wait=False);return self.state()
             if not self.resource:raise ValueError('media_not_loaded')
             request=urllib.request.Request(self.resource,data=b'suspend' if method.endswith('suspend') else b'resume',method='POST')
@@ -95,7 +99,25 @@ class Media:
             return self.state()
         raise ValueError('media_request_failed')
 
-    def open(self,args,browser=False):
+    def cancel_prefetch(self,preserve_failure=False):
+        candidate=self.next_media
+        self.next_media=None
+        if candidate is not None:
+            candidate.pump()
+            candidate.close(wait=False)
+            if preserve_failure and candidate.error:self.next_media=candidate
+
+    def prefetch(self):
+        if self.suspended or self.loading or self.error or not self.resource:return self.state()
+        available=sorted(n for n in self.metadata.get('episodes',[]) if n>self.metadata['episode'])
+        if not available or self.next_media is not None:return self.state()
+        candidate=Media(self.account)
+        candidate.resolver=self.resolver
+        candidate.open(dict(series=self.metadata['series'],episode=available[0],quality=self.arguments.get('quality','720p'),origin=self.arguments['origin']),browser=True,warmup=True)
+        self.next_media=candidate
+        return self.state()
+
+    def open(self,args,browser=False,warmup=False):
         if browser:
             origin=args.get('origin')
             if not isinstance(origin,str) or len(origin)>2048:raise ValueError('media_request_failed')
@@ -113,6 +135,21 @@ class Media:
         for option,(minimum,maximum) in {'position':(0,86400),'volume':(0,1),'speed':(0.25,4)}.items():
             if option in args and (type(args[option]) not in (int,float) or not math.isfinite(args[option]) or not minimum<=args[option]<=maximum):raise ValueError('media_request_failed')
         if 'mute' in args and type(args['mute']) is not bool:raise ValueError('media_request_failed')
+        args=dict(args,quality=quality)
+        candidate=self.next_media
+        self.next_media=None
+        if candidate is not None:
+            candidate.pump()
+            if browser and all(candidate.arguments.get(key)==args.get(key) for key in ('series','episode','quality','origin')):
+                if not self.account.current_identity((candidate.resolver or {}).get('owner')):
+                    candidate.close(wait=False);raise ValueError('saved_session_verification_failed')
+                self.close(wait=False)
+                # Move only the prepared pipeline; progress writers remain owned by this instance.
+                for key in ('generation','events','input_job','input_process','input_reader','metadata','arguments','resolver','loading','error','diagnostic','browser','resource','suspended'):
+                    setattr(self,key,getattr(candidate,key))
+                self.recorded=self.browser_final=None
+                return self.state()
+            candidate.close(wait=False)
         self.browser=browser
         self.close(wait=False)
         self.browser=browser;self.suspended=False
@@ -120,7 +157,7 @@ class Media:
         self.metadata.update(series=series,episode=episode)
         self.arguments=args.copy()
         self.error=None;self.diagnostic=None;self.loading=True
-        wire=(json.dumps(dict(series=series,episode=episode,quality=quality,resolver=self.resolver,**({'origin':origin} if browser else {})),separators=(',',':'))+'\n').encode()
+        wire=(json.dumps(dict(series=series,episode=episode,quality=quality,resolver=self.resolver,**({'origin':origin,'warmup':warmup} if browser else {})),separators=(',',':'))+'\n').encode()
         if len(wire)>65536:self.loading=False;raise ValueError('resolver_session_too_large')
         try:
             self.input_job=Job()
@@ -249,6 +286,7 @@ class Media:
             return thread
 
     def close(self,wait=True):
+        self.cancel_prefetch()
         self.loading=False;self.pending_play=False
         if self.process:
             try:

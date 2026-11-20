@@ -98,7 +98,7 @@ class Service:
             'media.mute': {'value'}, 'media.status': set(), 'media.close': set()}
         media_commands.update({'playback.open':{'series','episode','quality','origin'},'playback.status':set(),
             'playback.report_error':{'session','code'},
-            'playback.suspend':{'session'},'playback.resume':{'session'},'playback.close':{'session'},'playback.checkpoint':{'session','position','duration','final'}})
+            'playback.prefetch':{'session'},'playback.prefetch_cancel':{'session'},'playback.suspend':{'session'},'playback.resume':{'session'},'playback.close':{'session'},'playback.checkpoint':{'session','position','duration','final'}})
         if method in media_commands:
             if set(args) - media_commands[method]:
                 return error('invalid_request')

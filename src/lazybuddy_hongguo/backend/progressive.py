@@ -207,6 +207,10 @@ class Source:
                 size=min(end-start+1,len(value)-(start-block));result=value[start-block:start-block+size]
             if cancelled():return
             yield result;start+=size
+    def warmup(self):
+        # One bounded startup buffer, retained only in the existing memory cache.
+        for _ in self.read(0,min(self.total,1024*1024)-1):pass
+
     def stats(self):
         with self.lock:return {'file_bytes':self.total,'downloaded_bytes':self.downloaded,'metadata_bytes':len(self.moov),'cache_bytes':sum(map(len,self.cache.values())),'cache_limit':8*self.BLOCK,'range_requests':self.requests,'samples_encrypted':len(self.spans)}
 
