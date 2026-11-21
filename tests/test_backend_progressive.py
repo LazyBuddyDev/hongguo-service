@@ -112,6 +112,34 @@ class Tests(unittest.TestCase):
             result=source.open_range(m.urllib.request.Request(source.url,headers={'Range':'bytes=0-63'}))
             self.assertIs(result,media)
             self.assertEqual(second.request.call_args.kwargs['headers']['Range'],'bytes=0-63')
+    def test_delegated_media_nodes_require_the_observed_origin(self):
+        pairs=[('v5-reading-video-a.qznovelvod.com','1e86d09a96fb790a4h7gerru5ixbp27fv3d3b3v7yoe.vegslb.com'),
+            ('v11-reading-videocdn302.qznovelvod.com','61544863f28fb576a046b55fd14e44c5922c2c659e1c8c96.v.smtcdns.com')]
+        for index,(origin,node) in enumerate(pairs):
+            source='https://'+origin+'/a';target='https://'+node+'/b?token=fixture'
+            self.assertTrue(m.allowed(target,source))
+            for invalid_source in (None,'https://fixture.qznovelvod.com/a','https://untrusted.invalid/a','http://'+origin+'/a'):
+                self.assertFalse(m.allowed(target,invalid_source))
+            for invalid_target in ('http://'+node+'/b','https://'+node+':444/b','https://user@'+node+'/b',target+'#fragment',
+                    'https://'+node+'.evil.invalid/b','https://a.'+node+'/b','https://unrelated.vegslb.com/b','https://a.smtcdns.com/b'):
+                self.assertFalse(m.allowed(invalid_target,source))
+            with self.assertRaisesRegex(ValueError,'invalid_media_source'):m.Source(target,None)
+            with self.assertRaisesRegex(ValueError,'media_redirect_target_rejected'):m.check_redirect(target,source='https://'+pairs[1-index][0]+'/a')
+    def test_delegated_redirects_match_in_direct_and_proxy_paths(self):
+        for origin,node in [('v5-reading-video-a.qznovelvod.com','1e86d09a96fb790a4h7gerru5ixbp27fv3d3b3v7yoe.vegslb.com'),
+                ('v11-reading-videocdn302.qznovelvod.com','61544863f28fb576a046b55fd14e44c5922c2c659e1c8c96.v.smtcdns.com')]:
+            source=m.Source.__new__(m.Source);source.url='https://'+origin+'/a';source.connection=None;source.origin=None;source.proxy=False;source.tls=None
+            target='https://'+node+'/b';request=m.urllib.request.Request(source.url,headers={'Range':'bytes=0-63','Accept-Encoding':'identity'})
+            first=Mock();first.getresponse.return_value=Mock(status=302,headers={'Location':target});second=Mock();second.getresponse.return_value=Mock(status=206)
+            with patch.object(m.http.client,'HTTPSConnection',side_effect=[first,second]) as factory:
+                self.assertEqual(source.open_range(request).status,206);self.assertEqual(factory.call_count,2)
+                headers=second.request.call_args.kwargs['headers'];self.assertEqual(headers['Range'],'bytes=0-63')
+                self.assertFalse(any(k.lower() in ('cookie','authorization','referer') for k in headers))
+            handler=m.Redirect(source=source.url)
+            redirected=handler.redirect_request(request,None,302,'',{},target)
+            self.assertEqual(redirected.get_header('Range'),'bytes=0-63')
+            self.assertEqual(handler.redirect_request(redirected,None,302,'',{},target+'?next=1').full_url,target+'?next=1')
+            with self.assertRaisesRegex(ValueError,'media_redirect_target_rejected'):handler.redirect_request(redirected,None,302,'',{},'https://untrusted.invalid/b')
     def test_proxy_redirect_errors_have_same_categories_without_retry(self):
         for headers,expected in [({},'media_redirect_missing_location'),({'Location':'https://fixture.qznovelvod.com/a'},'media_redirect_limit')]:
             source=m.Source.__new__(m.Source);source.denied=False;source.proxy=False;source.url='https://fixture.qznovelvod.com/a'

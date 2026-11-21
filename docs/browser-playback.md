@@ -47,7 +47,9 @@ URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不�
 
 服务启动时将所选http/https/all/no代理设置转给自身辅助进程，使Go与Python路由一致，保留显式环境覆盖。宿主「是否直连」清除本服务代理并设置`NO_PROXY=*`，关闭后重建服务跟随系统/环境设置；不修改机器或Clash配置，也不能据此声称绕过TUN路由。
 
-取源前检查已验证端点，CDN逐跳校验HTTPS及允许来源，不附账号Cookie或网页Referer。错误细分为`media_redirect_https_required`、`media_redirect_target_rejected`、`media_redirect_missing_location`、`media_redirect_limit`；旧`media_redirect_rejected`仍可显示。不能为偶发故障放宽来源、增加自动重试或更换身份。手动重试由当前用户明确发起，保留当前剧与集的错误上下文。
+取源前检查已验证端点，CDN逐跳校验HTTPS及允许来源，不附账号Cookie或网页Referer。错误细分为`media_redirect_https_required`、`media_redirect_target_rejected`、`media_redirect_missing_location`、`media_redirect_limit`；旧`media_redirect_rejected`仍可显示。不能为偶发故障无条件放宽来源、增加自动重试或更换身份。手动重试由当前用户明确发起，保留当前剧与集的错误上下文。
+
+0.2.15起，初始片源仍只接受HTTPS的`*.qznovelvod.com`。媒体HTTPS响应中观察到的调度委派分别为`v5-reading-video-a.qznovelvod.com`到单层40–64位小写字母数字节点`<node>.vegslb.com`，以及`v11-reading-videocdn302.qznovelvod.com`到单层40–64位十六进制节点`<node>.v.smtcdns.com`。这两类目标仅能在对应初始来源的当前Range请求跳转链内使用，不能作为初始片源、跨来源复用或扩大到整个共享CDN；直连与代理都绑定不可变初始来源，保留HTTPS证书、443端口、无用户信息/片段、有限跳数及媒体Range/尺寸校验，不携带账号凭据。历史宿主诊断已记录原始HTTPS来源、目标及第1跳；当前实播与历史跳转回归分别验收，不能把正常节点播放成功当作两类节点均已现场复现。
 
 `app_playback_empty_response`只表示播放模型阶段HTTP200但正文为空，此时尚无浏览器资源，不能靠更换解码器解决。目录成功、手机可播或网站已登录均不能证明桌面App取源权限；网络、身份和请求兼容原因需日志证据，不猜测为账号拒绝。偶发真实网络问题的当前结论与下一步只在TASKS维护。
 

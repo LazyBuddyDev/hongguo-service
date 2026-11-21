@@ -12,9 +12,10 @@ Owner: Windows Codex. Updated:2026-11-21. Branch:main. Published package:0.2.14 
 
 ## LB-20261121-02 — Intermittent media redirect rejection
 
-Owner: Windows Codex. Updated:2026-11-21. Branch:main. Package:0.2.14. Diagnosis only, no runtime changes.
+Owner: Windows Codex. Updated:2026-11-21. Branch:main. Package:0.2.14. Fix implemented; acceptance and release in progress.
 - Goal: resolve intermittent rejection on verified media redirects while preserving HTTPS and per-hop origin checks.
 - `[√]` User reported series7708575928661576766 episode14,1080p/direct succeeded after two manual retries. Host log17:16:16 shows hop1 from v11-reading-videocdn302.qznovelvod.com to a host under v.smtcdns.com; another rejected chain originated at v5-reading-video-a.qznovelvod.com and targeted vegslb.com. progressive.py allowed() accepts only *.qznovelvod.com. Exact successful route is not recorded; retry success alone does not prove that route or trust.
-- `[x]` Establish official media usage and narrow trust conditions for the two redirect targets. Public search did not produce authoritative evidence. Shared-CDN ownership alone is insufficient; do not broaden allowlist or add retries to hide the failure.
-- `[x]` Implement verified adaptation, test direct/proxy hops and preserved Range plus rejection paths; create new immutable package and stage development bundle in host before delivery, then check original episode.
+- `[x]` Implemented two origin-bound opaque-node redirect rules from historical TLS-validated source responses; initial sources remain restricted. 34 affected unit/Range/browser lifecycle tests passed. Shared-CDN ownership alone is not an allow rule.
+- `[√]` New0.2.15 complete package built and staged; original episode14 played at1920x1080 for61 real browser frames/mediaTime2s with no account/progress writes. Current allocation used v26 and did not reproduce historical delegated nodes; those two historical paths are covered by synthetic direct/proxy regression tests. A preliminary preparation attempt failed without retained error detail; subsequent acceptance passed.
+- `[x]` Complete host1.0.10 build, signed module distribution, isolated installation/update and public-download validation, then publish under user authorization.
 - No real-account probes, credential reads or source requests made. Historic empty-response investigation above remains paused and separate.

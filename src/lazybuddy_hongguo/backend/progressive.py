@@ -3,19 +3,27 @@ import re,urllib.request,urllib.parse,urllib.error,http.server,http.client,ssl,s
 from .media_container import boxes,only,uint,byte_range,Cipher,algorithms,modes
 from lazybuddy_hongguo.diagnostics import failure
 
-def allowed(url):
+def allowed(url,source=None):
     try:
         u=urllib.parse.urlsplit(url)
-        return u.scheme=='https' and u.hostname and u.hostname.endswith('.qznovelvod.com') and u.port in (None,443) and not u.username and not u.password and not u.fragment
+        if not (u.scheme=='https' and u.hostname and u.port in (None,443) and not u.username and not u.password and not u.fragment):return False
+        if u.hostname.endswith('.qznovelvod.com'):return True
+        if not source:return False
+        previous=urllib.parse.urlsplit(source)
+        if not allowed(source):return False
+        # Only these observed HTTPS media origins delegate to these opaque CDN nodes.
+        patterns={'v5-reading-video-a.qznovelvod.com':r'[a-z0-9]{40,64}\.vegslb\.com',
+            'v11-reading-videocdn302.qznovelvod.com':r'[a-f0-9]{40,64}\.v\.smtcdns\.com'}
+        return bool(re.fullmatch(patterns.get(previous.hostname,r'(?!)'),u.hostname))
     except ValueError:return False
 class Redirect(urllib.request.HTTPRedirectHandler):
-    def __init__(self,context=None):self.context=context
+    def __init__(self,context=None,source=None):self.context,self.source=context,source
     def redirect_request(self,req,fp,code,msg,headers,url):
-        check_redirect(url,context=self.context,status=code,source=req.full_url)
+        check_redirect(url,context=self.context,status=code,source=self.source or req.full_url)
         return super().redirect_request(req,fp,code,msg,headers,url)
 
 def check_redirect(url,**details):
-    if not allowed(url):
+    if not allowed(url,details.get('source')):
         reason='media_redirect_https_required' if url.lower().startswith('http:') else 'media_redirect_target_rejected'
         raise failure(reason,stage='redirect',target=url,**details)
 
@@ -29,7 +37,7 @@ class Source:
         self.context=context
         self.connection=None;self.origin=None;self.tls=ssl.create_default_context()
         self.proxy=bool(urllib.request.getproxies().get('https'))
-        self.opener=urllib.request.build_opener(Redirect(context),urllib.request.HTTPSHandler(context=self.tls))
+        self.opener=urllib.request.build_opener(Redirect(context,url),urllib.request.HTTPSHandler(context=self.tls))
         self.lock=threading.Lock();self.cache=collections.OrderedDict();self.spans=[];self.tracks=set()
         prefix=self.fetch(0,self.INITIAL-1)
         top=[];pos=0
