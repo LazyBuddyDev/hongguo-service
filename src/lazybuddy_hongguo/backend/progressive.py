@@ -3,18 +3,24 @@ import re,urllib.request,urllib.parse,urllib.error,http.server,http.client,ssl,s
 from .media_container import boxes,only,uint,byte_range,Cipher,algorithms,modes
 from lazybuddy_hongguo.diagnostics import failure
 
+MEDIA_SCHEDULER = re.compile(r'v[0-9]+-(?:ex-)?reading-video(?:-[a-z]|cdn(?:302)?)?\.qznovelvod\.com')
+DELEGATED_CDN_NODE = re.compile(
+    r'(?:[a-z0-9]{40,63}\.(?:vegslb|bdcgslb)\.com|[a-f0-9]{40,63}\.v\.smtcdns\.com)'
+)
+
+
 def allowed(url,source=None):
     try:
         u=urllib.parse.urlsplit(url)
-        if not (u.scheme=='https' and u.hostname and u.port in (None,443) and not u.username and not u.password and not u.fragment):return False
+        if not (u.scheme=='https' and u.hostname and u.port in (None,443) and u.username is None and not u.fragment):return False
         if u.hostname.endswith('.qznovelvod.com'):return True
-        if not source:return False
-        previous=urllib.parse.urlsplit(source)
-        if not allowed(source):return False
-        # Numbered media origins share scheduling; qualified CDN nodes remain redirect-only.
-        return bool(re.fullmatch(r'v[0-9]+-reading-video(?:-[a-z]|cdn(?:302)?)?\.qznovelvod\.com',previous.hostname)
-            and re.fullmatch(r'(?:[a-z0-9]{40,64}\.vegslb\.com|[a-f0-9]{40,64}\.v\.smtcdns\.com)',u.hostname))
+        if not source or not allowed(source):return False
+        # A qualified CDN node is reachable only through the original media scheduler.
+        return bool(MEDIA_SCHEDULER.fullmatch(urllib.parse.urlsplit(source).hostname)
+                    and DELEGATED_CDN_NODE.fullmatch(u.hostname))
     except ValueError:return False
+
+
 class Redirect(urllib.request.HTTPRedirectHandler):
     def __init__(self,context=None,source=None):self.context,self.source=context,source
     def redirect_request(self,req,fp,code,msg,headers,url):
