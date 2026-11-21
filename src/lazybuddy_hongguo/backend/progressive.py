@@ -11,10 +11,9 @@ def allowed(url,source=None):
         if not source:return False
         previous=urllib.parse.urlsplit(source)
         if not allowed(source):return False
-        # Only these observed HTTPS media origins delegate to these opaque CDN nodes.
-        patterns={'v5-reading-video-a.qznovelvod.com':r'[a-z0-9]{40,64}\.vegslb\.com',
-            'v11-reading-videocdn302.qznovelvod.com':r'[a-f0-9]{40,64}\.v\.smtcdns\.com'}
-        return bool(re.fullmatch(patterns.get(previous.hostname,r'(?!)'),u.hostname))
+        # Numbered media origins share scheduling; qualified CDN nodes remain redirect-only.
+        return bool(re.fullmatch(r'v[0-9]+-reading-video(?:-[a-z]|cdn(?:302)?)?\.qznovelvod\.com',previous.hostname)
+            and re.fullmatch(r'(?:[a-z0-9]{40,64}\.vegslb\.com|[a-f0-9]{40,64}\.v\.smtcdns\.com)',u.hostname))
     except ValueError:return False
 class Redirect(urllib.request.HTTPRedirectHandler):
     def __init__(self,context=None,source=None):self.context,self.source=context,source

@@ -49,7 +49,7 @@ URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不�
 
 取源前检查已验证端点，CDN逐跳校验HTTPS及允许来源，不附账号Cookie或网页Referer。错误细分为`media_redirect_https_required`、`media_redirect_target_rejected`、`media_redirect_missing_location`、`media_redirect_limit`；旧`media_redirect_rejected`仍可显示。不能为偶发故障无条件放宽来源、增加自动重试或更换身份。手动重试由当前用户明确发起，保留当前剧与集的错误上下文。
 
-0.2.15起，初始片源仍只接受HTTPS的`*.qznovelvod.com`。媒体HTTPS响应中观察到的调度委派分别为`v5-reading-video-a.qznovelvod.com`到单层40–64位小写字母数字节点`<node>.vegslb.com`，以及`v11-reading-videocdn302.qznovelvod.com`到单层40–64位十六进制节点`<node>.v.smtcdns.com`。这两类目标仅能在对应初始来源的当前Range请求跳转链内使用，不能作为初始片源、跨来源复用或扩大到整个共享CDN；直连与代理都绑定不可变初始来源，保留HTTPS证书、443端口、无用户信息/片段、有限跳数及媒体Range/尺寸校验，不携带账号凭据。历史宿主诊断已记录原始HTTPS来源、目标及第1跳；当前实播与历史跳转回归分别验收，不能把正常节点播放成功当作两类节点均已现场复现。
+0.2.16起，初始片源仍只接受HTTPS的`*.qznovelvod.com`。调度跳转的初始来源须属于`v<数字>-reading-video`媒体命名族，允许无后缀、`-<单个小写字母>`、`cdn`及`cdn302`变体；编号或字母后缀变化不再改变同类媒体的委派能力。目标仍仅允许单层40–64位小写字母数字`<node>.vegslb.com`或40–64位十六进制`<node>.v.smtcdns.com`，不能将整个共享CDN当作片源范围。这些节点不能直接作为初始片源，仅限当前请求中已验证的媒体初始来源所委派的跳转链；直连和代理绑定同一不可变初始来源，保留HTTPS证书、443端口、无用户信息/片段、有限跳数及Range/尺寸校验，不携带账号凭据。未知来源或节点格式仍拒绝。历史宿主诊断已记录A/B来源、目标及第1跳；回归同时覆盖A/B/D及其他单字母后缀、来源编号和节点变化。实际播放与历史跳转回归分别验收，未现场复现的链路不得声称实播通过。
 
 `app_playback_empty_response`只表示播放模型阶段HTTP200但正文为空，此时尚无浏览器资源，不能靠更换解码器解决。目录成功、手机可播或网站已登录均不能证明桌面App取源权限；网络、身份和请求兼容原因需日志证据，不猜测为账号拒绝。偶发真实网络问题的当前结论与下一步只在TASKS维护。
 

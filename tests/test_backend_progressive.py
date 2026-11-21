@@ -112,21 +112,32 @@ class Tests(unittest.TestCase):
             result=source.open_range(m.urllib.request.Request(source.url,headers={'Range':'bytes=0-63'}))
             self.assertIs(result,media)
             self.assertEqual(second.request.call_args.kwargs['headers']['Range'],'bytes=0-63')
-    def test_delegated_media_nodes_require_the_observed_origin(self):
+    def test_delegated_media_nodes_require_a_numbered_media_origin(self):
         pairs=[('v5-reading-video-a.qznovelvod.com','1e86d09a96fb790a4h7gerru5ixbp27fv3d3b3v7yoe.vegslb.com'),
             ('v11-reading-videocdn302.qznovelvod.com','61544863f28fb576a046b55fd14e44c5922c2c659e1c8c96.v.smtcdns.com')]
-        for index,(origin,node) in enumerate(pairs):
+        for origin,node in pairs:
             source='https://'+origin+'/a';target='https://'+node+'/b?token=fixture'
             self.assertTrue(m.allowed(target,source))
-            for invalid_source in (None,'https://fixture.qznovelvod.com/a','https://untrusted.invalid/a','http://'+origin+'/a'):
+            for invalid_source in (None,'https://fixture.qznovelvod.com/a','https://untrusted.invalid/a','http://'+origin+'/a',
+                    'https://v5-reading-video-cover.qznovelvod.com/a','https://v5-reading-video-b.qznovelvod.com.evil.invalid/a'):
                 self.assertFalse(m.allowed(target,invalid_source))
             for invalid_target in ('http://'+node+'/b','https://'+node+':444/b','https://user@'+node+'/b',target+'#fragment',
                     'https://'+node+'.evil.invalid/b','https://a.'+node+'/b','https://unrelated.vegslb.com/b','https://a.smtcdns.com/b'):
                 self.assertFalse(m.allowed(invalid_target,source))
             with self.assertRaisesRegex(ValueError,'invalid_media_source'):m.Source(target,None)
-            with self.assertRaisesRegex(ValueError,'media_redirect_target_rejected'):m.check_redirect(target,source='https://'+pairs[1-index][0]+'/a')
+    def test_scheduler_node_and_origin_variants_do_not_depend_on_one_pair(self):
+        nodes=['1e86d09a96fb790a4w754s6mxhz4byadbrk3udgpprq.vegslb.com',
+            '61544863f28fb576a046b55fd14e44c5922c2c659e1c8c96.v.smtcdns.com']
+        for origin in ['v5-reading-video-a','v5-reading-video-b','v5-reading-video-d','v18-reading-video-z','v26-reading-videocdn302','v9-reading-videocdn','v12-reading-video']:
+            for node in nodes:
+                source='https://'+origin+'.qznovelvod.com/a';target='https://'+node+'/b'
+                self.assertTrue(m.allowed(target,source));m.check_redirect(target,source=source)
+                self.assertFalse(m.allowed(target));self.assertFalse(m.allowed(target,source.replace('https:','http:')))
     def test_delegated_redirects_match_in_direct_and_proxy_paths(self):
         for origin,node in [('v5-reading-video-a.qznovelvod.com','1e86d09a96fb790a4h7gerru5ixbp27fv3d3b3v7yoe.vegslb.com'),
+                ('v5-reading-video-b.qznovelvod.com','1e86d09a96fb790a4w754s6mxhz4byadbrk3udgpprq.vegslb.com'),
+                ('v5-reading-video-d.qznovelvod.com','1e86d09a96fb790a4w754s6mxhz4byadbrk3udgpprq.vegslb.com'),
+                ('v26-reading-videocdn302.qznovelvod.com','1e86d09a96fb790a4w754s6mxhz4byadbrk3udgpprq.vegslb.com'),
                 ('v11-reading-videocdn302.qznovelvod.com','61544863f28fb576a046b55fd14e44c5922c2c659e1c8c96.v.smtcdns.com')]:
             source=m.Source.__new__(m.Source);source.url='https://'+origin+'/a';source.connection=None;source.origin=None;source.proxy=False;source.tls=None
             target='https://'+node+'/b';request=m.urllib.request.Request(source.url,headers={'Range':'bytes=0-63','Accept-Encoding':'identity'})
