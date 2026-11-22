@@ -60,7 +60,7 @@ class BrowserPlayback(unittest.TestCase):
     def test_cancel_stops_candidate_and_late_events_cannot_repopulate_it(self):
         current,candidate,start=self.pair();start(dict(series='123',episode=3,quality='720p',origin=ORIGIN));current.next_media=candidate
         generation=candidate.generation;job=Mock();candidate.input_job=job
-        current.cancel_prefetch();job.stop.assert_called_once();self.assertIsNone(current.next_media)
+        current.cancel_prefetch();job.close.assert_called_once();self.assertIsNone(current.next_media)
         candidate.events.put((generation,dict(ok=True)));candidate.pump();self.assertIsNone(candidate.resource)
         self.assertEqual(current.resource,'current')
 

@@ -3,6 +3,9 @@ import json,os,pathlib,subprocess,time
 from concurrent.futures import ThreadPoolExecutor
 from . import credentials
 from .progressive import Source,Server
+from lazybuddy_hongguo.errors import MEDIA_CODES
+
+CATALOG_AGE=120
 
 def resolve(series,episode,quality,session,passport,on_error=None,origin=None,warmup=False):
     if not isinstance(series,str) or not series.isascii() or not series.isdecimal() or not 1<=len(series)<=32 or int(series)==0:raise ValueError('invalid_series')
@@ -20,14 +23,20 @@ def resolve(series,episode,quality,session,passport,on_error=None,origin=None,wa
     if profile is not None:credentials.remember_device(saved['uid'],profile)
     helper=pathlib.Path(os.environ.get('LAZYBUDDY_HONGGUO_HELPER') or str(pathlib.Path(__file__).resolve().parents[1]/'runtime/hongguo-app-resolver.exe'))
     if not helper.is_file():raise ValueError('app_resolver_unavailable')
-    request=dict(series=series,episode=episode,quality=quality,cookies=saved['cookies'],profile=profile,catalog=session.get('catalog',[]) if session.get('series')==series else [])
+    now=time.monotonic()
+    catalog_at=session.get('catalog_at',0.)
+    cached=session.get('catalog',[]) if session.get('series')==series and 0<=now-catalog_at<CATALOG_AGE else []
+    if not any(row['number']==episode and row['playable'] for row in cached):cached=[]
+    request=dict(series=series,episode=episode,quality=quality,cookies=saved['cookies'],profile=profile,catalog=cached)
     wire=(json.dumps(request,separators=(',',':'))+'\n').encode()
     if len(wire)>65536:raise ValueError('resolver_session_too_large')
     began=time.monotonic()
     try:process=subprocess.run([str(helper)],input=wire,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=25,creationflags=subprocess.CREATE_NO_WINDOW)
     except subprocess.TimeoutExpired:raise ValueError('app_source_timeout') from None
     if len(process.stdout)>65536:raise ValueError('app_response_invalid')
-    value=json.loads(process.stdout)
+    try:value=json.loads(process.stdout)
+    except (ValueError,UnicodeError):raise ValueError('app_response_invalid') from None
+    if not isinstance(value,dict):raise ValueError('app_response_invalid')
     if process.returncode or value.get('ok') is not True:
         code=value.get('error')
         diagnostic=value.get('diagnostic')
@@ -39,7 +48,7 @@ def resolve(series,episode,quality,session,passport,on_error=None,origin=None,wa
         if isinstance(diagnostic,dict) and diagnostic.get('stage') in ('playback','catalog','registration'):
             from lazybuddy_hongguo.diagnostics import describe
             detail=describe(code,stage=diagnostic['stage'],context=dict(series=series,episode=episode,quality=quality),status=diagnostic.get('http_status'),body_bytes=diagnostic.get('body_bytes'),body_read_ok=diagnostic.get('body_read_ok'),response_meta=diagnostic.get('response_meta'))
-        failure=ValueError(code if code in {'app_access_denied','app_media_unavailable','app_registration_unavailable','app_catalog_unavailable','app_playback_unavailable','app_source_unavailable','episode_unavailable','quality_unavailable','unsupported_wrapped_material','unsupported_media_layout','media_source_rejected','playback_episode_mismatch','app_rate_limited','app_source_network_error'} else 'app_source_unavailable')
+        failure=ValueError(code if isinstance(code,str) and code in MEDIA_CODES else 'app_source_unavailable')
         if isinstance(diagnostic,dict) and diagnostic.get('stage') in ('playback','catalog','registration'):failure.diagnostic=detail
         raise failure
     resolve_ms=round((time.monotonic()-began)*1000)
@@ -66,6 +75,6 @@ def resolve(series,episode,quality,session,passport,on_error=None,origin=None,wa
     if warmup:source.warmup()
     server=Server(source,on_error,origin=origin)
     result=dict(ok=True,identity_verified=True,series=series,episode=episode,episodes=episodes,width=width,height=height,available_qualities=value.get('available_qualities',[]),requested_quality=quality,transport='range_mp4',media=server.address,container=dict(video=True,audio=True,protected=False),
-        resolver=dict(owner=saved['uid'],series=series,profile=value['profile'],catalog=catalog),
+        resolver=dict(owner=saved['uid'],series=series,profile=value['profile'],catalog=catalog,catalog_at=catalog_at if cached else now),
         source_info=dict(backend='app',resolve_ms=resolve_ms,timings=dict(identity_before_ms=identity_before_ms,identity_after_ms=identity_after_ms,source_prepare_ms=source_prepare_ms,total_prepare_ms=round((time.monotonic()-prepare_started)*1000)),device_reused=profile is not None,initial=source.stats()))
     return result,server

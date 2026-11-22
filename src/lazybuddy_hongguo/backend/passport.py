@@ -79,6 +79,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class Passport:
     def __init__(self):
         self.jar = http.cookiejar.CookieJar()
+        self.name=''
         self.client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar), NoRedirect())
 
     def get(self, url):
@@ -118,7 +119,10 @@ class Passport:
                 raise ValueError('redirect_limit')
         if not any(c.name in ('sessionid', 'sessionid_ss') and c.value for c in self.jar):
             raise ValueError('missing_session')
-        return identity(self.call('/passport/account/info/v2/'))
+        data=self.call('/passport/account/info/v2/')
+        uid=identity(data)
+        self.name=str(data.get('screen_name') or data.get('name') or '红果用户')[:80]
+        return uid
 
     def record(self, uid):
         return credentials.validate(dict(v=1, uid=uid, cookies={c.name: c.value for c in self.jar
@@ -164,6 +168,7 @@ class Probe:
             self.client = None
             self.uid = None
             self.fingerprint = None
+            self.saved = False
             self.state = 'cancelled'
             self.error = None
 
@@ -202,15 +207,11 @@ class Probe:
                 if state is None:
                     raise ValueError('unknown_qr_state')
                 if state == 'confirmed':
-                    self.update(generation, state='verifying', image=b'')
+                    if not self.update(generation, state='verifying', image=b''):return
                     uid = client.confirm(data.get('redirect_url', ''))
                     fingerprint = hashlib.sha256(self.salt + uid.encode()).hexdigest()[:12]
-                    with self.lock:
-                        if generation != self.generation:
-                            return
-                        self.update(generation, state='signed_in', client=client, uid=uid, fingerprint=fingerprint)
-                        if self.persist:
-                            self.save()
+                    if not self.update(generation,state='verifying' if self.persist else 'signed_in',client=client,uid=uid,fingerprint=fingerprint):return
+                    if self.persist:self.save(generation)
                     return
                 if not self.update(generation, state=state):
                     return
@@ -221,35 +222,40 @@ class Probe:
         except Exception:
             self.update(generation, state='failed', image=b'', error='login_step_failed')
 
-    def save(self):
+    def save(self, generation=None):
         with self.lock:
-            if self.state != 'signed_in' or self.client is None:
-                return False
-            try:
-                record = self.client.record(self.uid)
-                if Passport.restore(record).confirm('') != self.uid:
-                    raise ValueError('saved_session_verification_failed')
-                credentials.save(record)
-                self.saved = True
-                self.error = None
-                return True
-            except Exception:
-                self.error = 'credential_save_failed'
-                return False
-
-    def restore(self):
+            if generation is None:generation=self.generation
+            if generation!=self.generation or self.state not in ('signed_in','verifying') or self.client is None:return False
+            client,uid=self.client,self.uid
         try:
+            record=client.record(uid)
+            if Passport.restore(record).confirm('')!=uid:raise ValueError('saved_session_verification_failed')
+            with self.lock:
+                if generation!=self.generation:return False
+                credentials.save(record)
+                return self.update(generation,state='signed_in',saved=True,error=None)
+        except Exception:
+            with self.lock:
+                if generation==self.generation:
+                    self.error='credential_save_failed'
+                    if self.state=='verifying':self.state='failed'
+            return False
+
+    def restore(self,cancelled=None):
+        with self.lock:generation=self.generation
+        try:
+            if cancelled is not None and cancelled.is_set():return
             record = credentials.read()
             if record is None:
                 return
-            self.saved = True
+            if not self.update(generation,saved=True):return
             client = Passport.restore(record)
+            if cancelled is not None and cancelled.is_set():return
             uid = client.confirm('')
             if uid != record['uid']:
                 raise ValueError('saved_identity_changed')
-            self.state = 'signed_in'
-            self.client, self.uid = client, uid
-            self.fingerprint = hashlib.sha256(self.salt + uid.encode()).hexdigest()[:12]
-        except Exception:
-            self.state = 'failed'
-            self.error = 'saved_session_verification_failed'
+            self.update(generation,state='signed_in',client=client,uid=uid,
+                        fingerprint=hashlib.sha256(self.salt+uid.encode()).hexdigest()[:12],error=None)
+        except Exception as error:
+            reason='invalid_credential_scope' if isinstance(error,ValueError) and error.args==('invalid_credential_scope',) else 'saved_session_verification_failed'
+            self.update(generation,state='failed',error=reason)

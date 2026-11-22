@@ -2,6 +2,48 @@ import contextlib,importlib.util,json,math,pathlib,tempfile,unittest,sys,threadi
 from unittest.mock import patch
 from lazybuddy_hongguo.backend import account as a
 class Tests(unittest.TestCase):
+ def test_progress_readback_must_match_the_full_checkpoint(self):
+  for overrides in ({'vid':'124'}, {'last_watch_time':99}, {'current_play_time':9999}):
+   with tempfile.TemporaryDirectory() as root,patch.dict(a.os.environ,LAZYBUDDY_DATA_DIR=root,LAZYBUDDY_INSTANCE='default'):
+    x=self.favorite_account()
+    local=dict(episode=1,time=10.,updated=200.,item='12346',duration=30.,count=2,synced=False)
+    x.history={'12345':local}
+    row=dict(series_id='12345',vid='12346',vid_index=1,episode_count=2,last_watch_time=200,current_play_time=10000,current_total_time=30000)|overrides
+    with patch.object(x,'cloud',side_effect=[{'code':0,'video_data':[]},{'code':0},{'code':0,'video_data':[row]}]):
+     x.sync_progress()
+    self.assertFalse(a.load_history('123')['12345']['synced'])
+    self.assertEqual(x.sync_state,'failed')
+ def test_quiescing_allows_accepted_write_readback_and_skips_next_upload(self):
+  with tempfile.TemporaryDirectory() as root,patch.dict(a.os.environ,LAZYBUDDY_DATA_DIR=root,LAZYBUDDY_INSTANCE='default'):
+   x=self.favorite_account();checkpoint=dict(episode=1,time=10.,updated=200.,item='12346',duration=30.,count=2,synced=False)
+   x.history={'12345':checkpoint,'23456':dict(checkpoint,item='23457')}
+   def cloud(mode,progress=None):
+    if mode=='progress_upload':x.pause_writes();x.resume_writes();return {'code':0}
+    if x.lifecycle_epoch==0:return {'code':0,'video_data':[]}
+    return {'code':0,'video_data':[dict(series_id='12345',vid='12346',vid_index=1,episode_count=2,last_watch_time=200,current_play_time=10000,current_total_time=30000)]}
+   with patch.object(x,'cloud',side_effect=cloud) as wire:
+    x.sync_progress()
+   self.assertEqual([call.args[0] for call in wire.call_args_list],['progress_read','progress_upload','progress_read'])
+   self.assertTrue(x.history['12345']['synced']);self.assertFalse(x.history['23456']['synced'])
+ def test_history_capacity_protects_pending_and_previous_file(self):
+  with tempfile.TemporaryDirectory() as root,patch.dict(a.os.environ,LAZYBUDDY_DATA_DIR=root),patch.object(a,'HISTORY_LIMIT',200):
+   x=self.favorite_account();old=dict(episode=1,time=1.,updated=100.,synced=True)
+   pending=dict(old,updated=200.,synced=False)
+   x.history={'1':old,'2':old,'3':old,'4':pending}
+   self.assertTrue(x.save_history())
+   self.assertIn('4',a.load_history('123'));self.assertNotIn('1',x.history)
+   initial=a.history_path('123').read_bytes()
+   self.assertFalse(x.save_history({str(i):pending for i in range(12)}))
+   self.assertEqual(a.history_path('123').read_bytes(),initial)
+   self.assertEqual(x.snapshot()['error'],'history_save_failed')
+   self.assertTrue(x.save_history());self.assertIsNone(x.snapshot()['error'])
+ def test_incomplete_favorites_never_replaces_confirmed_list(self):
+  x=self.favorite_account();x.favorites=[{'id':'12345','title':'fixture'}]
+  for meta in ({'has_more':True},{'next_cursor':'more'},{'total':2}):
+   with patch.object(x,'request',return_value={'shelf':{'code':0,'data':{'video_shelf_info':[],**meta}}}) as request:
+    response=x.call({'command':'favorite_set','series':'12345','favorite':False})
+   self.assertEqual(response['favorites'],[{'id':'12345','title':'fixture'}])
+   self.assertEqual(response['favorites_error'],'favorites_sync_failed');request.assert_called_once_with('favorites')
  def test_explicit_sync_can_retry_but_final_flush_does_not_reset_a_failure(self):
   account=self.favorite_account();account.sync_error='progress_sync_failed'
   with patch.object(account,'sync_progress') as sync:

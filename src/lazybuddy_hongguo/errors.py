@@ -10,6 +10,12 @@ MEDIA_CODES={
     'unsupported_protection','unsupported_media_layout','unsupported_top_level_box','media_input_failed','media_network_disabled',
     'login_required','invalid_media_pipe','media_runtime_unavailable','media_not_loaded','media_load_failed',
     'media_seek_failed','media_state_failed','media_request_failed','progress_save_failed','media_close_or_progress_failed',
+    'invalid_credential_scope','app_resolver_unavailable','app_response_invalid','unsupported_wrapped_material','invalid_catalog',
+    'invalid_media_source','invalid_media_box','invalid_sample_sizes','invalid_chunk_map','unsupported_chunk_map',
+    'invalid_chunk_offsets','invalid_sample_count','sample_outside_media','unsupported_sample_encryption',
+    'invalid_sample_iv','invalid_sample_subrange','invalid_sample_encryption_size','invalid_sample_spans',
+    'unsupported_sample_description','missing_content_key','unsupported_audio_entry','unsupported_track_encryption',
+    'unsupported_encryption_groups','media_source_rejected',
 }
 
 

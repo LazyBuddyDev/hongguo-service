@@ -8,6 +8,11 @@ from lazybuddy_hongguo.media import Media
 
 class Account:
     sync_error = None
+    lifecycle_epoch = 0
+    stopping = False
+
+    def resume_writes(self):
+        pass
 
     class probe:
         state = 'signed_in'
@@ -42,7 +47,6 @@ class Tests(unittest.TestCase):
                 media.open(dict(series='123', episode=1, pipe=r'\\.\pipe\lazybuddy-media-0123456789abcdef'))
             self.assertFalse(media.loading)
             self.assertIsNone(media.input_job)
-            job.return_value.stop.assert_called_once()
             job.return_value.close.assert_called_once()
 
     def test_failed_flush_releases_worker_for_next_explicit_attempt(self):

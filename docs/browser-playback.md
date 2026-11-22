@@ -8,7 +8,7 @@
 
 | 方法 | 参数 | 结果 |
 | --- | --- | --- |
-| `playback.open` | 字符串`series`、整数`episode`、可选字符串`quality`、明确`origin` | 新会话代数与loading状态 |
+| `playback.open` | 字符串`series`、整数`episode`、可选字符串`quality`、可选布尔`refresh_catalog`、明确`origin` | 新会话代数与loading状态 |
 | `playback.prefetch` | 当前整数`session` | 异步准备已验证目录中的唯一下一集，返回当前会话状态，不切换或暴露候选资源 |
 | `playback.prefetch_cancel` | 当前整数`session` | 取消候选准备与缓存，不改变当前集 |
 | `playback.status` | 无 | 当前loading/prepared/error、目录与资源 |
@@ -20,6 +20,8 @@
 准备完成时返回`prepared: true`、`resource: {url, mime: "video/mp4"}`、`session`、`suspended`，以及脱敏错误、进度、分集与清晰度字段。`available_qualities`是数字数组（如`[360,720,1080]`），请求`quality`使用带p字符串（如`"720p"`），客户端在边界转换，不把旧集档位照搬给新集。档位来自当前集实际兼容结果。0.2.12起，保存的清晰度是偏好：优先选择达到偏好的最近兼容档位；若当前集最高兼容档位低于偏好，则从同一响应选择最高兼容档位，不额外重试请求。客户端显示实际视频尺寸对应的清晰度，保留用户偏好供后续剧集使用。
 
 接受open不代表浏览器已解码。仅当前可见页面轮询准备状态；用`loadedmetadata`、实际尺寸、帧回调`mediaTime`、媒体error与真实EOS反馈播放。请求seek目标、滑块预览或服务声明时长不能代替已观看帧时间。
+
+分集目录最多复用120秒。目标集缺失、手动重试同一失败集或明确传入`refresh_catalog: true`时重新读取目录；已验证设备档案可继续复用。
 
 ## 下一集准备
 
@@ -35,13 +37,17 @@ URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不�
 
 支持GET、HEAD、单Range与OPTIONS；服务私有POST控制不能由携带浏览器Origin/Sec-Fetch的请求调用。资源只能读取当前固定媒体，不提供任意URL代理。上游签名、Cookie、密钥与明文媒体不落盘；资源读取、响应、缓存及尺寸均受界限约束。
 
+每个资源最多12个连接处理线程，其中最多4个可同时读取媒体。暂停、恢复和关闭在同一锁内更新读取状态与代数。
+
 ## 生命周期与进度
 
 隐藏时先暂停并卸载浏览器src，再suspend资源读取。已有上游读取最多等现有有界超时，取消代数下不得填新缓存或派生后续读取。恢复同一资源和实际位置但保持暂停，用户明确播放才继续。
 
 切根页面、打开设置或退出时close所属会话与进程树。session跨进程启动随机化，checkpoint、close、suspend和resume核对代数；旧页面不能关闭新播放器或覆盖其进度。相同最终检查点不重复提交云端。生命周期动作保留用户倍速、音量与静音。
 
-`LAZYBUDDY_CREDENTIAL_SCOPE`可隔离Windows凭据和设备目标，允许1–48个小写字母、数字或连字符；未设置时使用服务默认生产命名空间。真实宿主的数据目录与scope由宿主管理，不能因仓库整理复制凭据。测试使用显式独立目录及scope，不复用真实账号。
+`LAZYBUDDY_CREDENTIAL_SCOPE`隔离Windows凭据和设备目标，允许1–48个小写字母、数字或连字符。`LAZYBUDDY_INSTANCE`为`default`或未设置时可使用默认凭据空间，也可由宿主指定其既有的`shell-preview`。其他实例必须显式指定独立scope，并使用独立数据目录。
+
+已有桌面安装需要同时更新宿主与0.2.18服务。更新后的宿主继续使用既有生产凭据空间，并仍可连接0.2.17服务。
 
 ## 网络与故障诊断
 

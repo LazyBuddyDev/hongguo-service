@@ -2,7 +2,7 @@
 
 API v1，Windows x64。服务独立提供账号、搜索、官方收藏、观看进度、封面与媒体资源；不依赖宿主GUI。通用清单及JSON Lines约定见[宿主模块契约](https://github.com/LazyBuddyDev/LazyBuddy/blob/main/docs/module-api.md)，构建入口见[README](../README.md)。
 
-stdin每行一个UTF-8请求，如`{"version":1,"id":"h1","method":"health","args":{}}`。回复保留`version/id`，使用`ok:true,data`或`ok:false,error:{code}`；stdout不混日志。关闭stdin时等待已提交事务和必要保存后退出。
+stdin每行一个UTF-8请求，如`{"version":1,"id":"h1","method":"health","args":{}}`。回复保留`version/id`，使用`ok:true,data`或`ok:false,error:{code}`。关闭stdin时停止派发新的云端写入，已开始的写入及确认共用5秒收尾预算，未确认进度保留在本地。
 
 ## 业务方法
 
@@ -16,15 +16,20 @@ stdin每行一个UTF-8请求，如`{"version":1,"id":"h1","method":"health","arg
 | `progress.read` | 无 | 账号隔离的`history`与同步状态 |
 | `progress.sync` | 无 | pending事务，之后返回`history`、`sync_state`、`sync_error` |
 | `cover.read` | 已知字符串`series` | `series`、`width`、`height`、Base64 `rgba` |
+| `work.begin` | `method`、`args`，支持搜索、封面、账号恢复及取消扫码 | 整数`job` |
+| `work.status` | 整数`job` | `pending: true`或一次性`reply`，后者包含原业务回复 |
+| `work.cancel` | 无 | 取消当前连接的所有后台任务 |
 | `lifecycle.suspend` | 无 | 完成媒体/账号收尾，返回`suspended` |
 
 列表项包含字符串`id`、`title`、总`episodes`、`has_cover`。封面最多240×360 RGBA，客户端校验尺寸、Base64上限和字节数；服务只接受已知剧集ID，不接受任意图片URL。
+
+后台任务最多8个，搜索同时最多1个，任务60秒过期。页面代数变化时客户端取消并丢弃旧任务结果。升级前的服务会对`work.begin`返回`unknown_method`，客户端可调用原有同步方法。
 
 ## 登录与事务
 
 `qr_png`是Base64 PNG，不在二维码阶段时为空。状态包括`idle`、`preparing`、`pending`、`scanned`、`verifying`、`signed_in`、`failed`、`cancelled`。只有身份验证和安全保存均完成才显示已登录；cancel停止本次扫码，logout才删除本应用保存的身份。原始账号标识、设备档案、Cookie、Token、签名地址和密钥不公开。
 
-耗时收藏读写及进度同步返回`operation: "pending"`与`operation_method`，客户端通过`account.status`接收完成结果。期间`progress.read`仍可读取本地状态，其余账号操作可能返回`account_busy`。收藏乐观反馈与官方确认列表分离，失败/取消恢复反馈；不能以本地列表冒充官方账号收藏，不能自动重复写入。已提交事务离开后可能仍完成。
+耗时收藏读写及进度同步返回`operation: "pending"`与`operation_method`，客户端通过`account.status`接收完成结果。期间`progress.read`仍可读取本地状态，其余账号操作可能返回`account_busy`。收藏响应声明还有分页或数量不全时，保留上次完整列表并报告失败。收藏乐观反馈与官方确认列表分离，失败或取消时恢复反馈。已提交事务离开后可能仍完成。
 
 扫码只在可见二维码视图轮询，离开停止；非当前页面不能续期账号、同步收藏或预加载。关闭服务等待已提交事务收尾，不中断为未完成的事务保存。凭据仅使用Windows安全存储；独立验证使用独立数据目录和`LAZYBUDDY_CREDENTIAL_SCOPE`，规则见[浏览器播放](browser-playback.md)。
 
@@ -32,7 +37,7 @@ stdin每行一个UTF-8请求，如`{"version":1,"id":"h1","method":"health","arg
 
 历史按字符串剧ID索引，包含`episode`、秒数`time`与Unix秒`updated`。恢复账号读取本地快照，可见客户端再显式同步云端；合并按更新时间，包括较新的回退，不按最大集号或位置。播放/加载期间主动云同步可能返回`player_busy`。
 
-仅真实观看帧形成检查点，播放中保存本地，暂停/关闭等最终动作再提交；无变化不重复上传。只有官方读回确认才标记同步完成，失败或读取不完整保留待上传与本地文件。测试不读取真实凭据或进行官方写入，真实账号与节目权限另验。
+仅真实观看帧形成检查点，播放中保存本地，最终动作使用已提交的检查点收尾。回读必须匹配分集资源ID、集号、位置及服务端精度下的时间戳才确认上传。历史最大1 MiB，超限时优先移除最早的已确认或旧版记录，保留待上传项。测试使用独立凭据空间及合成响应。
 
 ## 媒体
 

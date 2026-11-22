@@ -172,6 +172,38 @@ class Tests(unittest.TestCase):
         next(reader);before=source.requests;cancelled=True
         self.assertEqual(list(reader),[]);self.assertEqual(source.requests,before)
 
+    def test_full_reader_pool_leaves_control_responsive(self):
+        import http.client,threading
+        release=threading.Event()
+        entered=threading.Semaphore(0)
+        origin='http://tauri.localhost'
+        class Source:
+            total=8
+            def read(self,start,end,cancelled):
+                entered.release()
+                release.wait(3)
+                if not cancelled():yield b'fixture!'
+        server=m.Server(Source(),origin=origin)
+        worker=threading.Thread(target=server.serve,daemon=True);worker.start()
+        clients=[http.client.HTTPConnection(server.host,timeout=2) for _ in range(7)]
+        path='/'+server.token+'/stream.mp4'
+        try:
+            for client in clients[:4]:
+                client.request('GET',path,headers={'Origin':origin,'Range':'bytes=0-7'})
+                self.assertEqual(client.getresponse().status,206)
+                self.assertTrue(entered.acquire(timeout=2))
+            clients[4].request('GET',path,headers={'Origin':origin})
+            self.assertEqual(clients[4].getresponse().status,503)
+            clients[5].request('POST',path,body=b'suspend')
+            self.assertEqual(clients[5].getresponse().status,204)
+            release.set()
+            clients[6].request('HEAD',path,headers={'Origin':origin})
+            self.assertEqual(clients[6].getresponse().status,409)
+        finally:
+            release.set()
+            for client in clients:client.close()
+            server.server.shutdown();server.close();worker.join(2)
+
     def test_new_get_cancels_old_stream_but_head_does_not(self):
         import http.client,threading
         started=threading.Event();release=threading.Event();stopped=threading.Event()

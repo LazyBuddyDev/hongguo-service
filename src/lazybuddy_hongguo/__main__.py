@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 import sys
-import subprocess
 from .protocol import Service
 from .media import Media
+from .jobs import run
 
 
 def backend():
@@ -14,10 +14,10 @@ def backend():
 def main():
     from .network import configure_helpers
     configure_helpers()
-    def search(request):
+    def search(request,cancelled=None):
         helper = Path(__file__).resolve().parent / 'runtime/lazybuddy-hongguo-search.exe'
-        result = subprocess.run([str(helper),'--private-covers'], input=json.dumps(request).encode(), capture_output=True,
-                                timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+        result = run([str(helper),'--private-covers'],input=json.dumps(request).encode(),
+                     timeout=15,memory_limit=256*1024*1024,cancelled=cancelled)
         if result.returncode or len(result.stdout) > 4 * 1024 * 1024:
             raise ValueError('search_failed')
         return json.loads(result.stdout)

@@ -11,4 +11,14 @@ class Selection(unittest.TestCase):
         self.assertEqual(selection.select(['docs/media-runtime.md']),[])
         self.assertEqual(selection.select(['scripts/toolchain_paths.py']),['test_toolchain_paths'])
 
+    def test_backend_modules_select_the_tests_for_their_consumers(self):
+        for source, tests in {
+            'account': {'test_account'},
+            'passport': {'test_backend_probe'},
+            'lease': {'test_account', 'test_cover_cache'},
+            'media_container': {'test_backend_media', 'test_backend_progressive'},
+        }.items():
+            with self.subTest(source=source):
+                self.assertEqual(set(selection.select([f'src/lazybuddy_hongguo/backend/{source}.py'])), tests)
+
 if __name__=='__main__':unittest.main()

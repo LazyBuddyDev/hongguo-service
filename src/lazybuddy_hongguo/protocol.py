@@ -3,6 +3,18 @@ VERSION = 1
 import threading
 import queue
 import base64
+import time
+from dataclasses import dataclass
+
+DEFERRED={'search','cover.read','account.restore','account.cancel'}
+
+@dataclass
+class Work:
+    method:str
+    cancelled:threading.Event
+    result:queue.Queue
+    thread:threading.Thread
+    deadline:float
 
 
 class Service:
@@ -15,20 +27,115 @@ class Service:
         self.covers = {}
         self.last_account = {}
         self.operation = None
+        self.work={}
+        self.next_work=0
 
-    def close(self):
+    def close(self, timeout=5.):
+        deadline=time.monotonic()+timeout
+        self.cancel_work()
+        account=self.account
+        if account is not None:account.quiesce()
         flush=None
         if self.media is not None:
             flush=self.media.close(wait=False)
             self.media=None
-        if self.operation is not None:
-            self.operation[0].join()
-            self.operation = None
-        if flush is not None:flush.join()
+        operation,self.operation=self.operation,None
+        if account is not None and account.write_pending:
+            for thread in (operation[0] if operation else None,flush):
+                if thread is not None:thread.join(max(0.,deadline-time.monotonic()))
         if self.account is not None:
             self.account.probe.cancel()
             self.account = None
         self.covers.clear();self.last_account.clear()
+
+    def cancel_work(self):
+        restoring=self.restoring()
+        for job in self.work.values():job.cancelled.set()
+        if restoring and self.account is not None:
+            self.account.quiesce()
+            self.account=None
+            self.last_account={}
+            self.covers.clear()
+
+    def restoring(self):
+        return any(job.method.startswith('account.') for job in self.work.values() if not job.cancelled.is_set())
+
+    def expire_work(self):
+        now=time.monotonic()
+        if any(job.method.startswith('account.') and job.deadline<=now and not job.cancelled.is_set() for job in self.work.values()):
+            self.cancel_work()
+        for key,job in list(self.work.items()):
+            if job.deadline<=now:job.cancelled.set()
+            if job.cancelled.is_set() and not job.thread.is_alive():del self.work[key]
+
+    def search_reply(self,reply):
+        if reply.get('ok'):
+            for row in reply['data']['items']:
+                cover=row.pop('_cover',None)
+                row['has_cover']=bool(cover)
+                if cover:self.covers[row['id']]=cover
+            if len(self.covers)>500:self.covers={row['id']:self.covers[row['id']] for row in reply['data']['items'] if row['id'] in self.covers}
+        else:
+            from .diagnostics import describe
+            reply.setdefault('error',{})['diagnostic']=describe('search_failed',stage='search')
+        return reply
+
+    def cover_work(self,series):
+        from .covers import read,read_cached
+        url=self.covers.get(series)
+        if url is None:return lambda cancelled:read_cached(series)
+        favorite=any(row.get('id')==series for row in self.last_account.get('favorites',[]))
+        return lambda cancelled:read(url,series=series if favorite else None,cancelled=cancelled)
+
+    def begin_work(self,request,method,args):
+        if len(self.work)>=8 or (method=='search' and any(j.method==method for j in self.work.values())):
+            raise ValueError('request_busy')
+        if method=='search':
+            if self.search_factory is None:raise ValueError('search_unavailable')
+            def run(cancelled):return self.search_factory(dict(request,method=method,args=args),cancelled)
+        elif method=='cover.read':
+            if set(args)!={'series'} or not isinstance(args['series'],str):raise ValueError('cover_unavailable')
+            read=self.cover_work(args['series'])
+            def run(cancelled):return dict(series=args['series'],**read(cancelled))
+        else:
+            if args:raise ValueError('invalid_request')
+            if self.restoring():raise ValueError('account_busy')
+            if self.operation is not None:
+                if self.operation[0].is_alive():raise ValueError('account_busy')
+                self.operation=None
+            if method=='account.restore' and self.media is not None:
+                if self.account.write_pending:raise ValueError('account_busy')
+                self.account.pause_writes()
+                self.media.close(wait=False);self.media=None
+                self.account.resume_writes()
+            if self.account is None:self.account=self.account_factory()
+            account=self.account
+            def run(cancelled):return account.call(dict(command=method.split('.')[1],cancelled=cancelled))
+        cancelled=threading.Event()
+        result=queue.Queue(maxsize=1)
+        def execute():
+            try:
+                if not cancelled.is_set():result.put((True,run(cancelled)))
+            except Exception:result.put((False,None))
+        thread=threading.Thread(target=execute,daemon=True)
+        self.next_work+=1
+        self.work[self.next_work]=Work(method,cancelled,result,thread,time.monotonic()+60)
+        thread.start()
+        return self.next_work
+
+    def account_reply(self,raw,method):
+        for row in raw.get('favorites',[]):
+            if row.get('cover'):self.covers[row['id']]=row['cover']
+        data={key:raw.get(key) for key in ('state','name','error','favorites_error','operation','operation_method')}
+        data['qr_png']=base64.b64encode(bytes(raw.get('qr') or b'')).decode('ascii')
+        data['favorites']=[{**{key:row.get(key) for key in ('id','title','episodes')},'has_cover':bool(row.get('cover'))} for row in raw.get('favorites',[])]
+        if method.startswith('progress.') or raw.get('operation_method')=='progress.sync':
+            data['history']={series:{key:row.get(key) for key in ('episode','time','updated')} for series,row in raw.get('history',{}).items()}
+            data.update({key:raw.get(key) for key in ('sync_state','sync_error')})
+        from .diagnostics import describe
+        for field in ('error','favorites_error','sync_error'):
+            if data.get(field):data['diagnostic']=describe(data[field],stage='account')
+        return data
 
     def handle(self, request):
         supplied_id=request.get('id','') if isinstance(request,dict) else ''
@@ -50,6 +157,33 @@ class Service:
         args = request.get('args', {})
         if not isinstance(args, dict):
             return error('invalid_request')
+        def ok(data):return dict(version=VERSION,id=identifier,ok=True,data=data)
+        self.expire_work()
+        if method=='work.cancel':
+            if args:return error('invalid_request')
+            self.cancel_work()
+            return ok({})
+        if method=='work.begin':
+            if set(args)!={'method','args'} or type(args['method']) is not str or args['method'] not in DEFERRED or not isinstance(args['args'],dict):
+                return error('invalid_request')
+            try:return ok(dict(job=self.begin_work(request,args['method'],args['args'])))
+            except ValueError as failure:return error(str(failure) if str(failure) in ('request_busy','search_unavailable','cover_unavailable','invalid_request','account_busy') else 'account_request_failed')
+            except Exception:return error('account_request_failed')
+        if method=='work.status':
+            if set(args)!={'job'} or type(args['job']) is not int:return error('invalid_request')
+            job=self.work.get(args['job'])
+            if job is None or job.cancelled.is_set():return error('work_cancelled')
+            try:success,payload=job.result.get_nowait()
+            except queue.Empty:return ok(dict(pending=True))
+            del self.work[args['job']]
+            code={'search':'search_failed','cover.read':'cover_unavailable'}.get(job.method,'account_request_failed')
+            if not success:return ok(dict(reply=error(code)))
+            try:
+                if job.method=='search':reply=self.search_reply(payload)
+                elif job.method=='cover.read':reply=ok(payload)
+                else:self.last_account=payload;reply=ok(self.account_reply(payload,job.method))
+                return ok(dict(reply=reply))
+            except Exception:return ok(dict(reply=error(code)))
         if method == 'health':
             return dict(version=VERSION, id=identifier, ok=True, data=dict(service='hongguo', api_version=VERSION,capabilities=dict(browser_resources=True,credential_scopes=True)))
         if method=='lifecycle.suspend':
@@ -63,31 +197,15 @@ class Service:
             try:
                 if self.search_factory is None:
                     return error('search_unavailable')
-                reply = self.search_factory(request)
-                if reply.get('ok'):
-                    for row in reply['data']['items']:
-                        cover=row.pop('_cover',None)
-                        row['has_cover']=bool(cover)
-                        if cover:self.covers[row['id']]=cover
-                    if len(self.covers)>500:self.covers={row['id']:self.covers[row['id']] for row in reply['data']['items'] if row['id'] in self.covers}
-                if not reply.get('ok'):
-                    from .diagnostics import describe
-                    reply.setdefault('error',{})['diagnostic']=describe('search_failed',stage='search')
-                return reply
+                return self.search_reply(self.search_factory(request))
             except Exception:
                 return error('search_failed')
         if method == 'cover.read':
             if set(args)!={'series'} or not isinstance(args['series'],str):
                 return error('cover_unavailable')
             try:
-                from .covers import read,read_cached
                 series=args['series']
-                if series not in self.covers:
-                    pixels=read_cached(series)
-                else:
-                    favorite=any(row.get('id')==series for row in self.last_account.get('favorites',[]))
-                    pixels=read(self.covers[series],series=series) if favorite else read(self.covers[series])
-                return dict(version=VERSION,id=identifier,ok=True,data=dict(series=series,**pixels))
+                return ok(dict(series=series,**self.cover_work(series)(None)))
             except Exception:
                 return error('cover_unavailable')
         commands = {'account.status': 'status', 'account.restore': 'restore', 'account.login': 'login',
@@ -96,12 +214,13 @@ class Service:
         media_commands = {'media.open': {'series', 'episode', 'quality', 'pipe','position','volume','mute','speed'}, 'media.play': set(),
             'media.pause': set(), 'media.seek': {'value'}, 'media.speed': {'value'}, 'media.boost':{'value'}, 'media.volume': {'value'},
             'media.mute': {'value'}, 'media.status': set(), 'media.close': set()}
-        media_commands.update({'playback.open':{'series','episode','quality','origin'},'playback.status':set(),
+        media_commands.update({'playback.open':{'series','episode','quality','origin','refresh_catalog'},'playback.status':set(),
             'playback.report_error':{'session','code'},
             'playback.prefetch':{'session'},'playback.prefetch_cancel':{'session'},'playback.suspend':{'session'},'playback.resume':{'session'},'playback.close':{'session'},'playback.checkpoint':{'session','position','duration','final'}})
         if method in media_commands:
             if set(args) - media_commands[method]:
                 return error('invalid_request')
+            if self.restoring() and method in ('media.open','playback.open'):return error('account_busy')
             try:
                 if self.media_factory is None:
                     return error('media_unavailable')
@@ -125,6 +244,10 @@ class Service:
                     or not 1 <= len(series) <= 32 or int(series) == 0 or type(args.get('favorite')) is not bool):
                 return error('invalid_favorite')
         try:
+            if self.restoring():
+                if method in ('account.status','progress.read'):
+                    return ok(self.account_reply(self.last_account,method))
+                return error('account_busy')
             if self.operation is not None:
                 thread,replies,operation_method=self.operation
                 if thread.is_alive():
@@ -137,9 +260,14 @@ class Service:
                     raw=self.last_account
                     if method!='account.status':raw=None
             else:raw=None
-            if method in ('account.logout', 'account.login', 'account.restore') and self.media is not None:
-                self.media.close()
-                self.media = None
+            if method in ('account.logout', 'account.login', 'account.restore'):
+                if self.media is not None:
+                    if self.account.write_pending:return error('account_busy')
+                    self.account.pause_writes()
+                    self.media.close(wait=False)
+                    self.media=None
+                    self.account.resume_writes()
+                if method!='account.restore':self.cancel_work()
             if self.account is None:
                 self.account = self.account_factory()
             if method == 'progress.sync' and self.media is not None:
@@ -162,23 +290,8 @@ class Service:
                     self.last_account=raw
             if method in ('account.logout','account.login'):
                 self.covers.clear()
-            for row in raw.get('favorites',[]):
-                if row.get('cover'):self.covers[row['id']]=row['cover']
-            # Explicit projection: never publish owner, playback_session, profile, cookies or signed URLs.
-            data = {key: raw.get(key) for key in ('state', 'name', 'error', 'favorites_error')}
-            data['qr_png']=base64.b64encode(bytes(raw.get('qr') or b'')).decode('ascii')
-            data['operation']=raw.get('operation')
-            data['operation_method']=raw.get('operation_method')
-            data['favorites'] = [{key: row.get(key) for key in ('id', 'title', 'episodes')}
-                                 for row in raw.get('favorites', [])]
-            for row,original in zip(data['favorites'],raw.get('favorites',[])):row['has_cover']=bool(original.get('cover'))
-            if method.startswith('progress.') or raw.get('operation_method')=='progress.sync':
-                data['history'] = {series:{key:row.get(key) for key in ('episode','time','updated')}
-                                   for series,row in raw.get('history', {}).items()}
-                data.update({key:raw.get(key) for key in ('sync_state','sync_error')})
-            from .diagnostics import describe
-            for field in ('error','favorites_error','sync_error'):
-                if data.get(field):data['diagnostic']=describe(data[field],stage='account')
-            return dict(version=VERSION, id=identifier, ok=True, data=data)
+            return ok(self.account_reply(raw,method))
         except Exception as exception:
+            from .errors import code
+            if code(exception)=='invalid_credential_scope':return error('invalid_credential_scope')
             return error('account_request_failed',exception)

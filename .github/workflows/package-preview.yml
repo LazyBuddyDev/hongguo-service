@@ -29,9 +29,6 @@ jobs:
       - name: Build service packages
         shell: pwsh
         run: |
-          cargo build --release --locked --manifest-path search/Cargo.toml
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & scripts/build-hongguo-resolver.ps1
           python -B scripts/prepare-module-runtimes.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -B scripts/package-modules.py --output target/packages

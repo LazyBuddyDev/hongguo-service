@@ -3,6 +3,7 @@ import ctypes
 from ctypes import wintypes
 import os
 import subprocess
+import time
 
 
 class Basic(ctypes.Structure):
@@ -52,11 +53,23 @@ class Job:
     def __del__(self):self.close()
 
 
-def run(arguments,input,timeout,memory_limit=None,**options):
+def run(arguments,input,timeout,memory_limit=None,cancelled=None,**options):
     with Job(memory_limit) as job:
+        if cancelled is not None and cancelled.is_set():raise ValueError('work_cancelled')
         process=job.spawn(arguments,**options)
         try:
-            stdout,_=process.communicate(input,timeout=timeout)
+            if cancelled is None:
+                stdout,_=process.communicate(input,timeout=timeout)
+            else:
+                deadline=time.monotonic()+timeout
+                while True:
+                    if cancelled.is_set():raise ValueError('work_cancelled')
+                    remaining=deadline-time.monotonic()
+                    if remaining<=0:raise subprocess.TimeoutExpired(arguments,timeout)
+                    try:
+                        stdout,_=process.communicate(input,timeout=min(remaining,.1))
+                        break
+                    except subprocess.TimeoutExpired:input=None
             return subprocess.CompletedProcess(arguments,process.returncode,stdout)
         except BaseException:
             job.stop();process.wait(timeout=5)

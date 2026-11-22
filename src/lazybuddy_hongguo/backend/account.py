@@ -5,9 +5,10 @@ from lazybuddy_hongguo.jobs import run as run_helper
 from . import passport
 from .lease import acquire
 
+HISTORY_LIMIT=1024*1024
+
 def username(client):
-    data = client.call('/passport/account/info/v2/')
-    return str(data.get('screen_name') or data.get('name') or '红果用户')[:80]
+    return client.name if client and isinstance(getattr(client,'name',None),str) and client.name else '红果用户'
 
 def history_path(uid):
     root = os.environ.get('LAZYBUDDY_DATA_DIR') or str(pathlib.Path(os.environ['LOCALAPPDATA']) / 'LazyBuddy')
@@ -17,8 +18,9 @@ def history_path(uid):
 def load_history(uid):
     path = history_path(uid)
     if not path.exists(): return {}
-    if path.stat().st_size > 1024 * 1024: raise ValueError('history_invalid')
-    data = json.loads(path.read_text(encoding='utf-8'))
+    with path.open('rb') as source:raw=source.read(HISTORY_LIMIT+1)
+    if len(raw)>HISTORY_LIMIT:raise ValueError('history_invalid')
+    data=json.loads(raw)
     if not isinstance(data, dict) or any(not k.isascii() or not k.isdecimal() or len(k)>32 or not valid_progress(v) for k,v in data.items()): raise ValueError('history_invalid')
     return data
 
@@ -34,6 +36,13 @@ def parse_favorites(raw):
     rows=data['video_shelf_info']
     if rows is None: rows=[]
     if not isinstance(rows,list) or len(rows)>5000: raise ValueError('favorites_invalid')
+    for envelope in (raw,data):
+        for key in ('has_more','hasMore'):
+            if key in envelope and envelope[key] not in (False,0):raise ValueError('favorites_incomplete')
+        for key in ('next_cursor','nextCursor','next_offset','nextOffset'):
+            if key in envelope and envelope[key] not in (None,'',0,'0'):raise ValueError('favorites_incomplete')
+        if 'total' in envelope and (type(envelope['total']) is not int or envelope['total']>len(rows) or envelope['total']<0):
+            raise ValueError('favorites_incomplete')
     result=[]; seen=set()
     for row in rows:
         if not isinstance(row,dict): raise ValueError('favorites_invalid')
@@ -76,10 +85,29 @@ def uploadable(value):
         and value['episode']<=value['count']<=9999 and type(value.get('duration')) in (float,int)
         and math.isfinite(value['duration']) and 0<value['duration']<=86400 and value['time']<=value['duration'])
 
+def confirmed_checkpoint(remote,local):
+    return (remote is not None and remote['item']==local.get('item') and remote['episode']==local['episode']
+            and round(remote['time']*1000)==round(local['time']*1000)
+            and remote['updated']>=(math.floor(local['updated']) if type(remote['updated']) is int else round(local['updated']*1000)/1000))
+
+def encode_history(history):
+    rows={series:json.dumps(series)+':'+json.dumps(value,separators=(',',':'),allow_nan=False) for series,value in history.items()}
+    size=2+sum(len(row)+1 for row in rows.values())-bool(rows)
+    if size>HISTORY_LIMIT:
+        for series in sorted((s for s,v in history.items() if v.get('synced') is not False),key=lambda s:history[s]['updated']):
+            row=rows.pop(series)
+            size-=len(row)+bool(rows)
+            del history[series]
+            if size<=HISTORY_LIMIT:break
+    if size>HISTORY_LIMIT:raise ValueError('history_limit')
+    return '{'+','.join(rows.values())+'}'
+
 class Account:
     def __init__(self):
         self.history_guard=threading.RLock();self.request_guard=threading.Lock();self.sync_guard=threading.Lock()
-        self.probe=passport.Probe(persist=True); self.name=''; self.history={}; self.owner=None; self.profile=None; self.favorites=[]; self.favorites_error=None; self.history_invalid=False; self.sync_state='idle'; self.sync_error=None; self.cloud_count=0
+        self.lifecycle_guard=threading.Lock()
+        self.stopping=False;self.lifecycle_epoch=0;self.write_epoch=None;self.write_pending=False
+        self.probe=passport.Probe(persist=True); self.name=''; self.history={}; self.owner=None; self.profile=None; self.favorites=[]; self.favorites_error=None; self.history_invalid=False; self.history_error=None; self.sync_state='idle'; self.sync_error=None; self.cloud_count=0
     def snapshot(self):
         p=self.probe
         with p.lock:
@@ -90,31 +118,32 @@ class Account:
                 try:self.history=load_history(p.uid); self.history_invalid=False
                 except (ValueError,OSError,json.JSONDecodeError):self.history={}; self.history_invalid=True
                 self.owner=p.uid
-                self.sync_error=None; self.sync_state='idle'
-            if signed and self.history_invalid:p.error='history_invalid'
+                self.history_error=None;self.sync_error=None; self.sync_state='idle'
+            error=p.error if not signed else ('history_invalid' if self.history_invalid else self.history_error or p.error)
             return dict(state='signed_in' if signed else ('failed' if p.state=='signed_in' else p.state), name=self.name if signed else '',
-                sync_state=self.sync_state,sync_error=self.sync_error,cloud_count=self.cloud_count,qr=p.image if p.state in ('pending','scanned') else b'', history=self.history_copy() if signed else {}, error=p.error, favorites=self.favorites if signed else [],favorites_error=self.favorites_error)
+                 sync_state=self.sync_state,sync_error=self.sync_error,cloud_count=self.cloud_count,qr=p.image if p.state in ('pending','scanned') else b'', history=self.history_copy() if signed else {}, error=error, favorites=self.favorites if signed else [],favorites_error=self.favorites_error)
     def history_copy(self):
         with self.history_guard:return copy.deepcopy(self.history)
-    def save_history(self):
-        with self.history_guard:return self._save_history()
-    def _save_history(self):
+    def save_history(self, proposed=None):
+        with self.history_guard:return self._save_history(proposed)
+    def _save_history(self, proposed=None):
         if self.history_invalid:return False
         path=history_path(self.probe.uid)
         try:
             with acquire(path.with_suffix('.lock'),wait=.2) as locked:
                 if not locked:raise OSError('history_busy')
-                merged=self.history_copy()
+                merged=self.history_copy() if proposed is None else proposed.copy()
                 for series,value in load_history(self.probe.uid).items():
                     local=merged.get(series)
                     if local is None or value['updated']>local['updated']:merged[series]=value
                     elif value['updated']==local['updated'] and value.get('synced') is True and value.get('item')==local.get('item') and value['episode']==local['episode'] and value['time']==local['time']:merged[series]=value
                 temp=path.with_suffix('.tmp')
-                try:temp.write_text(json.dumps(merged,separators=(',',':')),encoding='utf-8');os.replace(temp,path)
+                try:temp.write_text(encode_history(merged),encoding='utf-8');os.replace(temp,path)
                 finally:temp.unlink(missing_ok=True)
                 self.history=merged
+            self.history_error=None
             return True
-        except (OSError,ValueError):self.probe.error='history_save_failed';return False
+        except (OSError,ValueError):self.history_error='history_save_failed';return False
     def request(self, mode, **payload):
         with self.request_guard:return self._request(mode,**payload)
     def _request(self, mode, **payload):
@@ -123,6 +152,8 @@ class Account:
         if self.profile is None:self.profile=credentials.read_device(record['uid'])
         helper=pathlib.Path(os.environ.get('LAZYBUDDY_HONGGUO_HELPER') or str(pathlib.Path(__file__).resolve().parents[1]/'runtime/hongguo-app-resolver.exe'))
         request=dict(mode=mode,cookies=record['cookies'],profile=self.profile,**payload)
+        if mode in ('favorite_set','progress_upload') and (self.stopping or self.write_epoch!=self.lifecycle_epoch):
+            raise ValueError('account_suspended')
         result=run_helper([str(helper)],input=json.dumps(request).encode(),timeout=25,memory_limit=512*1024*1024)
         if len(result.stdout)>2*1024*1024:raise ValueError('account_response_invalid')
         response=json.loads(result.stdout)
@@ -144,50 +175,78 @@ class Account:
         raw=self.request('favorites').get('shelf')
         self.require_success(raw)
         self.favorites=parse_favorites(raw)
+    def pause_writes(self):
+        with self.lifecycle_guard:
+            self.stopping=True
+            self.lifecycle_epoch+=1
+    def resume_writes(self):
+        with self.lifecycle_guard:self.stopping=False
+    def quiesce(self):
+        self.pause_writes()
+        if not self.probe.saved or self.probe.state!='signed_in':self.probe.cancel()
+    def begin_write(self,epoch):
+        with self.lifecycle_guard:
+            if self.stopping or epoch!=self.lifecycle_epoch or self.write_pending:return False
+            self.write_epoch=epoch
+            self.write_pending=True
+            return True
+    def end_write(self):
+        with self.lifecycle_guard:self.write_pending=False
     def set_favorite(self, series, add):
         if not isinstance(series,str) or not series.isascii() or not series.isdecimal() or not 1<=len(series)<=32 or int(series)==0 or type(add) is not bool:raise ValueError('invalid_favorite')
         if os.environ.get('LAZYBUDDY_INSTANCE','default')!='default' and os.environ.get('LAZYBUDDY_FAVORITES_REAL')!='1':raise ValueError('favorites_write_disabled')
+        epoch=self.lifecycle_epoch
         self.read_favorites()
         if any(row['id']==series for row in self.favorites)!=add:
-            self.require_success(self.request('favorite_set',series=series,favorite=add).get('shelf'))
-            self.read_favorites()
-            if any(row['id']==series for row in self.favorites)!=add:raise ValueError('favorites_not_confirmed')
-    def sync_progress(self):
+            if not self.begin_write(epoch):raise ValueError('account_suspended')
+            try:
+                self.require_success(self.request('favorite_set',series=series,favorite=add).get('shelf'))
+                self.read_favorites()
+                if any(row['id']==series for row in self.favorites)!=add:raise ValueError('favorites_not_confirmed')
+            finally:self.end_write()
+    def sync_progress(self, epoch=None):
+        if epoch is None:epoch=self.lifecycle_epoch
         with self.sync_guard:
-            if self.probe.state!='signed_in' or not self.probe.saved:return
+            if self.stopping or epoch!=self.lifecycle_epoch or self.probe.state!='signed_in' or not self.probe.saved:return
             try:
                 with acquire(history_path(self.probe.uid).with_suffix('.sync-lock')) as locked:
-                    if locked:return self._sync_progress()
+                    if locked:return self._sync_progress(epoch)
                     self.sync_state='pending'
             except OSError:self.sync_error='progress_sync_failed';self.sync_state='failed'
-    def _sync_progress(self):
+    def _sync_progress(self,epoch):
         if self.history_invalid or self.sync_error or self.probe.state!='signed_in' or not self.probe.saved:return
         owner=self.probe.uid
-        initial={series:value['updated'] for series,value in self.history_copy().items() if value.get('synced') is False}
+        initial={series:value for series,value in self.history_copy().items() if value.get('synced') is False}
         try:
             remote=progress_rows(self.cloud('progress_read'))
             with self.history_guard:
-                if self.probe.uid!=owner or self.probe.state!='signed_in':return
+                if epoch!=self.lifecycle_epoch or self.probe.uid!=owner or self.probe.state!='signed_in':return
                 self.cloud_count=len(remote)
+                proposed=self.history_copy()
                 for series,value in remote.items():
-                    local=self.history.get(series)
-                    if local is None or value['updated']>local['updated'] or (local.get('synced') is not False and value['updated']>=local['updated']):self.history[series]=value
-                    elif local.get('synced') is False and value['item']==local.get('item') and abs(value['time']-local['time'])<1.5 and abs(value['updated']-local['updated'])<1.5:local['synced']=True
-                if not self.save_history():return
-                pending=[(series,value.copy()) for series,value in self.history.items() if initial.get(series)==value['updated'] and value.get('synced') is False and uploadable(value)]
-            writable=os.environ.get('LAZYBUDDY_INSTANCE','default')=='default' or os.environ.get('LAZYBUDDY_PROGRESS_REAL')=='1'
+                    local=proposed.get(series)
+                    if local is None or value['updated']>local['updated'] or (local.get('synced') is not False and value['updated']>=local['updated']):proposed[series]=value
+                    elif local.get('synced') is False and confirmed_checkpoint(value,local):local['synced']=True
+                if not self.save_history(proposed):return
+                pending=[(series,value.copy()) for series,value in self.history.items() if initial.get(series)==value and uploadable(value)]
+            writable=os.environ.get('LAZYBUDDY_PROGRESS_REAL','1' if os.environ.get('LAZYBUDDY_INSTANCE','default')=='default' else '0')=='1'
             if pending and not writable:self.sync_state='read_only';return
             for series,value in pending:
-                if self.probe.uid!=owner or self.probe.state!='signed_in':return
-                wire=dict(series=series,item=value['item'],episode=value['episode'],count=value['count'],time=round(value['time']*1000),duration=round(value['duration']*1000),updated=round(value['updated']*1000))
-                self.cloud('progress_upload',wire)
-                confirmed=progress_rows(self.cloud('progress_read')).get(series)
-                if confirmed is None or confirmed['episode']!=value['episode'] or abs(confirmed['time']-value['time'])>1.5:raise ValueError('progress_not_confirmed')
+                if self.stopping or self.probe.uid!=owner or self.probe.state!='signed_in':break
                 with self.history_guard:
-                    if self.probe.uid!=owner:return
-                    # A newer observed checkpoint stays pending while this upload completes.
-                    if self.history.get(series,{}).get('updated')==value['updated']:self.history[series]['synced']=True
-                    if not self.save_history():return
+                    if self.history.get(series)!=value:continue
+                if not self.begin_write(epoch):break
+                wire=dict(series=series,item=value['item'],episode=value['episode'],count=value['count'],time=round(value['time']*1000),duration=round(value['duration']*1000),updated=round(value['updated']*1000))
+                try:
+                    self.cloud('progress_upload',wire)
+                    confirmed=progress_rows(self.cloud('progress_read')).get(series)
+                    if not confirmed_checkpoint(confirmed,value):raise ValueError('progress_not_confirmed')
+                    with self.history_guard:
+                        if self.probe.uid!=owner:return
+                        if self.history.get(series)==value:
+                            proposed=dict(self.history,**{series:dict(value,synced=True)})
+                            if not self.save_history(proposed):return
+                finally:self.end_write()
             self.sync_state='pending' if any(value.get('synced') is False for value in self.history_copy().values()) else 'synced'
         except Exception:
             self.sync_error='progress_sync_failed';self.sync_state='failed'
@@ -201,6 +260,8 @@ class Account:
         self.probe.restore()
         if self.probe.state!='signed_in' or not self.probe.saved:return
         self.owner=self.probe.uid
+        self.name=username(self.probe.client)
+        self.history_error=None
         try:self.history=load_history(self.owner);self.history_invalid=False
         except (ValueError,OSError,json.JSONDecodeError):self.history={};self.history_invalid=True
         self.profile=credentials.read_device(self.owner)
@@ -208,13 +269,20 @@ class Account:
         command=request.get('command')
         if command=='restore':
             self.owner=None
-            self.probe.cancel(); self.probe.saved=False; self.probe.error=None; self.probe.restore()
+            self.probe.cancel(); self.probe.saved=False; self.probe.error=None
+            cancelled=request.get('cancelled')
+            if cancelled is None:self.probe.restore()
+            else:self.probe.restore(cancelled)
         elif command=='login':
+            credentials.require_scope()
             self.probe.cancel(); self.probe=passport.Probe(persist=True); self.probe.start()
         elif command=='cancel':
-            self.probe.cancel();self.probe.saved=False;self.probe.restore()
+            self.probe.cancel();self.probe.saved=False
+            cancelled=request.get('cancelled')
+            if cancelled is None:self.probe.restore()
+            else:self.probe.restore(cancelled)
         elif command=='logout':
-            self.probe.cancel(); credentials.delete(); self.name=''; self.owner=None; self.history={}; self.favorites=[]; self.profile=None; self.favorites_error=None; self.sync_error=None; self.sync_state='idle'
+            credentials.delete();self.probe.cancel();self.name='';self.owner=None;self.history={};self.favorites=[];self.profile=None;self.favorites_error=None;self.history_error=None;self.sync_error=None;self.sync_state='idle'
         elif command in ('favorites','favorite_set'):
             if self.probe.state!='signed_in' or not self.probe.saved:raise ValueError('login_required')
             try:
@@ -226,7 +294,7 @@ class Account:
         elif command=='sync':
             if request.get('flush') is not True and not self.history_invalid:self.sync_error=None
             if request.get('flush') is not True or any(value.get('synced') is False for value in self.history_copy().values()):
-                self.sync_progress()
+                self.sync_progress(request.get('epoch'))
         elif command=='progress':
             if self.history_invalid:return self.snapshot()
             if self.probe.state!='signed_in' or not self.probe.saved: raise ValueError('login_required')
@@ -237,8 +305,6 @@ class Account:
                 candidate=dict(value,**{key:context.get(key) for key in ('item','duration','count')},synced=False)
                 if uploadable(candidate):value=candidate
             with self.history_guard:
-                self.history[series]=value
-                if value.get('synced') is False:self.sync_state='pending'
-                self.save_history()
+                if self.save_history(dict(self.history,**{series:value})) and value.get('synced') is False:self.sync_state='pending'
         elif command!='status': raise ValueError('invalid_command')
         return self.snapshot()
