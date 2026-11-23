@@ -16,6 +16,10 @@
 | `playback.suspend/resume` | 整数`session` | 停止/允许资源读取，加载中suspend取消准备 |
 | `playback.checkpoint` | `session`、秒数`position/duration`、可选布尔`final` | 保存真实观看断点，final请求提交 |
 | `playback.close` | 整数`session` | 释放资源与输入进程，收尾已有进度事务 |
+| `danmaku.read` | 当前已准备且未挂起的整数`session` | 首次调用后台读取当前集，轮询返回`pending`、`items`（`text`与毫秒时间`offset_ms`）或`error` |
+| `danmaku.cancel` | 当前整数`session` | 取消弹幕读取并丢弃当前弹幕结果 |
+
+从 0.2.19 起，播放状态声明 `danmaku: true`。弹幕使用已验证分集目录和已有设备档案读取，经独立任务处理。账号 Cookie 不参与弹幕取数。切集、关闭或挂起会取消任务并丢弃结果；上游仅返回精选数据，每集读取最多 32 个时间窗口、1200 条弹幕。
 
 准备完成时返回`prepared: true`、`resource: {url, mime: "video/mp4"}`、`session`、`suspended`，以及脱敏错误、进度、分集与清晰度字段。`available_qualities`是数字数组（如`[360,720,1080]`），请求`quality`使用带p字符串（如`"720p"`），客户端在边界转换，不把旧集档位照搬给新集。档位来自当前集实际兼容结果。0.2.12起，保存的清晰度是偏好：优先选择达到偏好的最近兼容档位；若当前集最高兼容档位低于偏好，则从同一响应选择最高兼容档位，不额外重试请求。客户端显示实际视频尺寸对应的清晰度，保留用户偏好供后续剧集使用。
 

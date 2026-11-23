@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/beilunyang/openhongguo/adapters/memstore"
 	"github.com/beilunyang/openhongguo/sdk"
+	"github.com/beilunyang/openhongguo/sdk/model"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,6 +18,55 @@ import (
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestDanmakuFollowsEmptyWindowsAndDeduplicates(t *testing.T) {
+	item := model.Danmaku{ID: "1", Text: " sample ", OffsetMS: 2400}
+	pages := map[string]*model.DanmakuPage{
+		"":       {HasMore: true, Cursor: "second"},
+		"second": {Items: []model.Danmaku{item}, HasMore: true, Cursor: "third"},
+		"third":  {Items: []model.Danmaku{item, {Text: "invalid", OffsetMS: -1}}},
+	}
+	calls := 0
+	items, err := readDanmaku(func(options sdk.DanmakuOptions) (*model.DanmakuPage, error) {
+		calls++
+		page := pages[options.Cursor]
+		if page == nil {
+			t.Fatalf("unexpected cursor %q", options.Cursor)
+		}
+		return page, nil
+	})
+	if err != nil || calls != 3 || len(items) != 1 || items[0] != (danmakuItem{Text: "sample", OffsetMS: 2400}) {
+		t.Fatalf("unexpected timeline %v after %d reads: %v", items, calls, err)
+	}
+}
+
+func TestDanmakuRouteDoesNotReceiveAccountCookies(t *testing.T) {
+	hits := 0
+	wire := &transport{cookies: map[string]string{"sessionid": "fixture"}, client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		hits++
+		if _, err := r.Cookie("sessionid"); err == nil {
+			t.Fatal("account cookie reached comment list")
+		}
+		return &http.Response{StatusCode: 403, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})}}
+	ctx := context.Background()
+	address := "https://api5-normal-sinfonlinea.fqnovel.com/novel/commentapi/comment/list/123/v1/"
+	for _, request := range []*sdk.Request{
+		{Method: "GET", URL: address},
+		{Method: "POST", URL: strings.Replace(address, "/list/", "/create/", 1)},
+	} {
+		if _, err := wire.Do(ctx, request); err == nil {
+			t.Fatal("unexpected comment endpoint allowed")
+		}
+	}
+	if _, err := wire.Do(ctx, &sdk.Request{Method: "POST", URL: address}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wire.Do(ctx, &sdk.Request{Method: "POST", URL: address}); err == nil || hits != 1 {
+		t.Fatal("denied comment request was retried")
+	}
+}
+
 func TestPlayerRequestUsesSameDeviceAndExactEpisode(t *testing.T) {
 	for _, matching := range []bool{true, false} {
 		store := memstore.New()

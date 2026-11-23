@@ -11,7 +11,9 @@ import time
 import urllib.parse
 import urllib.request
 import secrets
+from concurrent.futures import Future
 from .jobs import Job
+from .jobs import run as run_helper
 from .errors import code
 
 
@@ -42,8 +44,10 @@ class Media:
         self.suspended=False
         self.browser_final=None
         self.next_media=None
+        self.danmaku_work=None
 
     def call(self,method,args):
+        if method.startswith('danmaku.'):return self.danmaku(method,args)
         if method.startswith('playback.'):return self.playback(method,args)
         if method=='media.open':return self.open(args)
         if method=='media.close':
@@ -64,6 +68,44 @@ class Media:
         state=self.request(method.removeprefix('media.'),args)
         if method=='media.pause':self.checkpoint(state);self.flush()
         return dict(self.metadata,**state,progress_error=self.local_error or self.account.sync_error)
+
+    def cancel_danmaku(self):
+        if self.danmaku_work is not None:
+            self.danmaku_work[0].set()
+            self.danmaku_work=None
+
+    def danmaku(self,method,args):
+        self.pump()
+        if type(args.get('session')) is not int or args['session']!=self.generation or not self.browser:
+            raise ValueError('media_not_loaded')
+        if method=='danmaku.cancel':
+            self.cancel_danmaku()
+            return {}
+        resolver=self.resolver or {}
+        if not self.resource or self.suspended or not self.account.current_identity(resolver.get('owner')):
+            self.cancel_danmaku()
+            raise ValueError('media_not_loaded')
+        if self.danmaku_work is None:
+            series=self.metadata['series']
+            item=next((row['id'] for row in resolver['catalog'] if row['number']==self.metadata['episode'] and row['playable']),None)
+            if item is None or resolver.get('series')!=series:raise ValueError('danmaku_unavailable')
+            wire=json.dumps(dict(mode='danmaku',series=series,item=item,profile=resolver.get('profile'))).encode()
+            helper=Path(os.environ.get('LAZYBUDDY_HONGGUO_HELPER') or str(Path(__file__).resolve().parent/'runtime/hongguo-app-resolver.exe'))
+            cancelled=threading.Event()
+            result=Future()
+            def read():
+                try:
+                    process=run_helper([str(helper)],input=wire,timeout=25,memory_limit=512*1024*1024,cancelled=cancelled)
+                    if process.returncode or len(process.stdout)>2*1024*1024:raise ValueError()
+                    response=json.loads(process.stdout)
+                    if response.get('ok') is not True or not isinstance(response.get('items'),list):raise ValueError()
+                    result.set_result(dict(items=response['items']))
+                except Exception:
+                    result.set_result(dict(error='danmaku_unavailable'))
+            self.danmaku_work=(cancelled,result)
+            threading.Thread(target=read,daemon=True).start()
+        result=self.danmaku_work[1]
+        return result.result() if result.done() else dict(pending=True)
 
     def playback(self,method,args):
         if method=='playback.open':return self.open(args,browser=True)
@@ -95,6 +137,7 @@ class Media:
         if method in ('playback.suspend','playback.resume'):
             if method=='playback.suspend':
                 self.account.pause_writes()
+                self.cancel_danmaku()
                 self.cancel_prefetch(preserve_failure=True)
             if self.loading:self.close(wait=False);return self.state()
             if not self.resource:raise ValueError('media_not_loaded')
@@ -240,7 +283,7 @@ class Media:
 
     def state(self):
         if self.browser:return dict(self.metadata,loading=self.loading,prepared=self.resource is not None,session=self.generation,
-                resource=dict(url=self.resource,mime='video/mp4') if self.resource else None,suspended=self.suspended,error=self.error,diagnostic=self.diagnostic,
+                resource=dict(url=self.resource,mime='video/mp4') if self.resource else None,danmaku=True,suspended=self.suspended,error=self.error,diagnostic=self.diagnostic,
                 progress_error=self.local_error or self.account.sync_error,progress_pending=self.flush_thread is not None)
         try:
             state=self.request('status',{}) if self.process is not None else dict(loaded=False,playing=False,eos=False,position=0,duration=0)
@@ -317,6 +360,7 @@ class Media:
         return thread
 
     def stop_resources(self):
+        self.cancel_danmaku()
         self.generation+=1
         self.resource=None
         retiring=[]

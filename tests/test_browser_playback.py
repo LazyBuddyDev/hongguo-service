@@ -1,5 +1,6 @@
 """Browser resource access and lifecycle, using memory data and localhost only."""
 import http.client
+import json
 import threading
 import unittest
 from unittest.mock import Mock,patch
@@ -28,6 +29,31 @@ class BrowserPlayback(unittest.TestCase):
         def start(args,**_):
             candidate.arguments=args;candidate.browser=True;candidate.metadata=dict(series='123',episode=3,episodes=[1,3,4]);candidate.loading=True
         return current,candidate,start
+
+    def test_danmaku_uses_current_catalog_item_and_cancels_on_close(self):
+        current,_,_=self.pair()
+        current.resolver.update(series='123',catalog=[dict(id='111',number=1,playable=True)])
+        session=current.generation
+        args=dict(session=session)
+        started=threading.Event()
+        stopped=threading.Event()
+        wires=[]
+        def run(_args,*,input,cancelled,**_):
+            wires.append(json.loads(input))
+            started.set()
+            if cancelled.wait(3):stopped.set()
+            return Mock(returncode=0,stdout=b'{"ok":true,"items":[]}')
+        with patch('lazybuddy_hongguo.media.run_helper',side_effect=run) as helper:
+            with self.assertRaises(ValueError):current.call('danmaku.read',dict(session=session-1))
+            self.assertEqual(current.call('danmaku.read',args),dict(pending=True))
+            self.assertTrue(started.wait(3))
+            self.assertEqual(current.call('danmaku.read',args),dict(pending=True))
+            self.assertEqual(wires,[dict(mode='danmaku',series='123',item='111',profile=None)])
+            current.close(wait=False)
+            self.assertTrue(stopped.wait(3))
+            self.assertIsNone(current.danmaku_work)
+            with self.assertRaises(ValueError):current.call('danmaku.read',args)
+            helper.assert_called_once()
 
     def test_prefetch_is_one_verified_adjacent_episode_and_does_not_replace_current(self):
         current,candidate,start=self.pair();generation=current.generation

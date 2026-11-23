@@ -44,6 +44,7 @@ type request struct {
 	Cookies  map[string]string  `json:"cookies"`
 	Profile  *sdk.DeviceProfile `json:"profile"`
 	Catalog  []episode          `json:"catalog"`
+	Item     string             `json:"item"`
 }
 type transport struct {
 	client       *http.Client
@@ -62,9 +63,10 @@ func (t *transport) Do(ctx context.Context, r *sdk.Request) (*sdk.Response, erro
 		return nil, errors.New("endpoint_rejected")
 	}
 	api := u.Host == "api5-normal-sinfonlinea.fqnovel.com" && (u.Path == "/novel/player/video_detail/v1/" || u.Path == "/novel/player/video_model/v1/" || ((u.Path == "/reading/bookapi/bookshelf/video/info/v1/" || u.Path == "/reading/bookapi/read_progress/list/v1/") && r.Method == "GET") || ((u.Path == "/reading/bookapi/read_progress/upload/v1/" || u.Path == "/reading/bookapi/bookshelf/video/update/v1/") && r.Method == "POST"))
+	danmaku := u.Host == "api5-normal-sinfonlinea.fqnovel.com" && r.Method == "POST" && danmakuPath.MatchString(u.Path)
 	registration := u.Host == "log5-applog-lq.fqnovel.com" && u.Path == "/service/2/device_register/"
 	player := u.Host == "api5-normal-sinfonlineb.fqnovel.com" && u.Path == "/reading/bookapi/video_tab/multi_video_model/v1/" && r.Method == "GET"
-	if !api && !registration && !player {
+	if !api && !registration && !player && !danmaku {
 		return nil, errors.New("endpoint_rejected")
 	}
 	t.status, t.bytes, t.readOK = 0, 0, false
@@ -111,7 +113,7 @@ func (t *transport) Do(ctx context.Context, r *sdk.Request) (*sdk.Response, erro
 	}
 	defer response.Body.Close()
 	t.responseMeta = responseMetadata(response)
-	if response.StatusCode == 403 {
+	if response.StatusCode == 401 || response.StatusCode == 403 {
 		t.denied = true
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
@@ -186,8 +188,50 @@ func favoriteBody(series string, add bool, stamp int64) ([]byte, error) {
 	return json.Marshal(body)
 }
 
+var danmakuPath = regexp.MustCompile(`^/novel/commentapi/comment/list/[0-9]{1,32}/v1/$`)
+
+type danmakuItem struct {
+	Text     string `json:"text"`
+	OffsetMS int64  `json:"offset_ms"`
+}
+
+func readDanmaku(list func(sdk.DanmakuOptions) (*model.DanmakuPage, error)) ([]danmakuItem, error) {
+	items := []danmakuItem{}
+	seen := map[string]bool{}
+	var options sdk.DanmakuOptions
+	// shortcut: bound one episode read to 32 windows and 1200 comments, load windows on demand if longer episodes need support.
+	for range 32 {
+		page, err := list(options)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range page.Items {
+			content := strings.TrimSpace(item.Text)
+			if content == "" || len(content) > 600 || item.OffsetMS < 0 || item.OffsetMS > 86400000 || (item.ID != "" && seen[item.ID]) {
+				continue
+			}
+			if item.ID != "" {
+				seen[item.ID] = true
+			}
+			items = append(items, danmakuItem{Text: content, OffsetMS: item.OffsetMS})
+			if len(items) == 1200 {
+				return items, nil
+			}
+		}
+		if !page.HasMore || page.Cursor == "" || options.Cursor == page.Cursor {
+			break
+		}
+		options.Cursor = page.Cursor
+	}
+	return items, nil
+}
+
 func resolve(input request) (result map[string]any, err error) {
-	if input.Mode == "favorite_set" {
+	if input.Mode == "danmaku" {
+		if !id.MatchString(input.Series) || !id.MatchString(input.Item) || len(input.Cookies) != 0 {
+			return nil, errors.New("invalid_request")
+		}
+	} else if input.Mode == "favorite_set" {
 		if !id.MatchString(input.Series) || input.Favorite == nil {
 			return nil, errors.New("invalid_request")
 		}
@@ -198,7 +242,7 @@ func resolve(input request) (result map[string]any, err error) {
 	for _, name := range []string{"sessionid", "sessionid_ss", "sid_tt", "uid_tt", "uid_tt_ss", "sid_guard", "passport_csrf_token", "passport_csrf_token_default", "passport_auth_status", "passport_auth_status_ss"} {
 		allowed[name] = true
 	}
-	if len(input.Cookies) == 0 || len(input.Cookies) > len(allowed) {
+	if (len(input.Cookies) == 0 && input.Mode != "danmaku") || len(input.Cookies) > len(allowed) {
 		return nil, errors.New("saved_credentials_missing")
 	}
 	for name, value := range input.Cookies {
@@ -223,6 +267,15 @@ func resolve(input request) (result map[string]any, err error) {
 	client, err := sdk.NewClient(sdk.Options{Transport: wire, ProfileStore: store, RetryAttempts: 1, DeviceResets: sdk.Int(0)})
 	if err != nil {
 		return nil, err
+	}
+	if input.Mode == "danmaku" {
+		items, err := readDanmaku(func(options sdk.DanmakuOptions) (*model.DanmakuPage, error) {
+			return client.ListDanmaku(ctx, input.Series, input.Item, options)
+		})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "items": items}, nil
 	}
 	if input.Mode == "favorites" {
 		raw, err := client.BriefDockVideoShelf(ctx)

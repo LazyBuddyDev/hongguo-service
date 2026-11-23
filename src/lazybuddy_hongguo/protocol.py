@@ -215,7 +215,7 @@ class Service:
             'media.pause': set(), 'media.seek': {'value'}, 'media.speed': {'value'}, 'media.boost':{'value'}, 'media.volume': {'value'},
             'media.mute': {'value'}, 'media.status': set(), 'media.close': set()}
         media_commands.update({'playback.open':{'series','episode','quality','origin','refresh_catalog'},'playback.status':set(),
-            'playback.report_error':{'session','code'},
+            'playback.report_error':{'session','code'},'danmaku.read':{'session'},'danmaku.cancel':{'session'},
             'playback.prefetch':{'session'},'playback.prefetch_cancel':{'session'},'playback.suspend':{'session'},'playback.resume':{'session'},'playback.close':{'session'},'playback.checkpoint':{'session','position','duration','final'}})
         if method in media_commands:
             if set(args) - media_commands[method]:
