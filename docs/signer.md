@@ -21,6 +21,6 @@ python -B scripts/prepare-hongguo-signer.py \
 python -B scripts/package-modules.py --output target/packages/signer-candidate
 ```
 
-准备脚本以 Gradle 构建 JAR，用 jlink 生成精简 Java 镜像，不修改系统 Java。默认打包包含 hongguo、python-runtime、hongguo-signer；准备失败不应发布缺少运行时的包。运行时保留 Java legal/NOTICE、上游源码与许可。公开分发前还须核对 native App 库和全部依赖的再分发条件；上游项目许可证不自动证明随附原生库的分发许可。
+准备脚本以 Gradle 构建 JAR，用 jlink 生成精简 Java 镜像，不修改系统 Java。默认打包包含 hongguo、python-runtime、hongguo-signer；准备失败不应发布缺少运行时的包。运行时保留 Java legal/NOTICE、上游源码与许可。上游项目声明 Apache 2.0；其自带 App 原生库的再分发授权已由维护者在本次完整发布中确认，不将其表述为本项目原创。Java 遵循 GPLv2 + Classpath Exception，完整对应源码 `OpenJDK21U-jdk-sources_21.0.13.1_2.tar.gz` 随红果 v0.2.20 Release 独立提供，保留运行时 legal/NOTICE；JAR 依赖的许可证保留在各 JAR 内。
 
 离线测试覆盖精确签名字节、凭据隔离、恶意响应、失败不回退、懒启动与退出回收。Windows 实际签名、完整包安装和真实节目播放分别验收；签名返回成功不能证明原 HTTP 200 空体问题已经解决。
