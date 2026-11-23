@@ -24,6 +24,7 @@ def select(paths):
             if relative=='backend_media_container':modules.update(('test_backend_media','test_backend_progressive'))
             if relative in ('backend_app_input','errors','diagnostics'):modules.update(('test_backend_credentials','test_diagnostics'))
             if relative=='__main__':modules.add('test_protocol')
+            if relative in ('signer','jobs','__main__','backend_app_input','backend_account','media'):modules.add('test_signer')
         if name in ('scripts/check-changes.py','.github/workflows/checks.yml'):modules.add('test_selection')
         if name in ('scripts/toolchain_paths.py','scripts/package-modules.py','scripts/prepare-module-runtimes.py','scripts/build-hongguo-resolver.ps1','scripts/prepare-media-sdk.ps1'):modules.add('test_toolchain_paths')
     return sorted(modules)

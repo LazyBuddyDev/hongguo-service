@@ -34,6 +34,8 @@ def main():
             print(json.dumps(service.handle(request), separators=(',', ':')), flush=True)
     finally:
         service.close()
+        from .signer import local
+        local.close()
 
 
 if __name__ == '__main__':

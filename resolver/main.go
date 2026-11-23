@@ -47,6 +47,7 @@ type request struct {
 	Item     string             `json:"item"`
 }
 type transport struct {
+	signer       *signerClient
 	client       *http.Client
 	cookies      map[string]string
 	denied       bool
@@ -87,6 +88,11 @@ func (t *transport) Do(ctx context.Context, r *sdk.Request) (*sdk.Response, erro
 	}
 	for k, v := range r.Headers {
 		req.Header.Set(k, v)
+	}
+	if !registration && t.signer != nil {
+		if err := t.signer.sign(ctx, req, r.Body); err != nil {
+			return nil, err
+		}
 	}
 	if api || player {
 		// Replace SDK placeholders by name; appending can send an empty CSRF cookie first.
@@ -259,6 +265,10 @@ func resolve(input request) (result map[string]any, err error) {
 		}
 	}
 	wire := &transport{client: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, cookies: input.Cookies}
+	wire.signer, err = configuredSigner()
+	if err != nil {
+		return nil, err
+	}
 	defer func() {
 		if err != nil {
 			result = map[string]any{"stage": wire.stage, "diagnostic": map[string]any{"stage": wire.stage, "http_status": wire.status, "body_bytes": wire.bytes, "body_read_ok": wire.readOK, "response_meta": wire.responseMeta}}

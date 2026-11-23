@@ -35,6 +35,10 @@ def stage(identifier,destination,profile):
     if identifier=='python-runtime':
         if not (PYTHON/'python.exe').is_file():raise ValueError('prepare private Python runtime first')
         shutil.copytree(PYTHON,destination/'bin')
+    elif identifier=='hongguo-signer':
+        source=ROOT/'target/runtimes/hongguo-signer'
+        if not (source/'java/bin/java.exe').is_file():raise ValueError('prepare private signer runtime first')
+        shutil.copytree(source,destination,dirs_exist_ok=True)
     elif identifier=='hongguo':
         service=destination/'service'
         shutil.copytree(ROOT/'src/lazybuddy_hongguo',service/'lazybuddy_hongguo',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
@@ -81,7 +85,7 @@ def stage(identifier,destination,profile):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--modules',default='hongguo,python-runtime')
+    parser.add_argument('--modules',default='hongguo,python-runtime,hongguo-signer')
     parser.add_argument('--profile',choices=['debug','release'],default='release')
     parser.add_argument('--output',type=Path,default=ROOT/'target/packages')
     parser.add_argument('--base-url',default='https://example.invalid/lazybuddy')
@@ -89,7 +93,7 @@ def main():
     output=args.output.resolve()
     if not output.is_relative_to(ROOT/'target') or output.exists():raise ValueError('new output directory inside target required')
     identifiers=args.modules.split(',')
-    if any(identifier not in ('hongguo','python-runtime','media-runtime') for identifier in identifiers):
+    if any(identifier not in ('hongguo','python-runtime','media-runtime','hongguo-signer') for identifier in identifiers):
         raise ValueError('unknown module')
     if 'hongguo' in identifiers:build_helpers(args.profile)
     output.mkdir(parents=True)

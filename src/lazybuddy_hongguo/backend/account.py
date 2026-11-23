@@ -154,7 +154,8 @@ class Account:
         request=dict(mode=mode,cookies=record['cookies'],profile=self.profile,**payload)
         if mode in ('favorite_set','progress_upload') and (self.stopping or self.write_epoch!=self.lifecycle_epoch):
             raise ValueError('account_suspended')
-        result=run_helper([str(helper)],input=json.dumps(request).encode(),timeout=25,memory_limit=512*1024*1024)
+        from lazybuddy_hongguo.signer import local
+        result=run_helper([str(helper)],input=json.dumps(request).encode(),timeout=25,memory_limit=512*1024*1024,env=local.environment())
         if len(result.stdout)>2*1024*1024:raise ValueError('account_response_invalid')
         response=json.loads(result.stdout)
         if result.returncode or not response.get('ok'):raise ValueError('account_unavailable')

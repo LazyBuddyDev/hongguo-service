@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "hongguo",
   "name": "红果短剧",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "service_api": 1,
   "target": "windows-x86_64",
   "entrypoint": "service/main.py",
@@ -13,6 +13,10 @@
     "favorites_method": "favorites.read"
   },
   "dependencies": [
+    {
+      "id": "hongguo-signer",
+      "version": "0.1.0"
+    },
     {
       "id": "python-runtime",
       "version": "0.1.0"

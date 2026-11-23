@@ -31,7 +31,9 @@ def resolve(series,episode,quality,session,passport,on_error=None,origin=None,wa
     wire=(json.dumps(request,separators=(',',':'))+'\n').encode()
     if len(wire)>65536:raise ValueError('resolver_session_too_large')
     began=time.monotonic()
-    try:process=subprocess.run([str(helper)],input=wire,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=25,creationflags=subprocess.CREATE_NO_WINDOW)
+    from lazybuddy_hongguo.signer import local
+    environment=local.environment()
+    try:process=subprocess.run([str(helper)],input=wire,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=25,creationflags=subprocess.CREATE_NO_WINDOW,env=environment)
     except subprocess.TimeoutExpired:raise ValueError('app_source_timeout') from None
     if len(process.stdout)>65536:raise ValueError('app_response_invalid')
     try:value=json.loads(process.stdout)

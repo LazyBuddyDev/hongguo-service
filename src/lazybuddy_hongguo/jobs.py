@@ -37,7 +37,7 @@ class Job:
 
     def spawn(self,arguments,**options):
         # Helpers wait for stdin before spawning descendants; attach before sending input.
-        process=subprocess.Popen(arguments,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+        process=subprocess.Popen(arguments,stdin=subprocess.PIPE,stdout=options.pop('stdout',subprocess.PIPE),stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,**options)
         if not self.kernel.AssignProcessToJobObject(self.handle,int(process._handle)):
             process.kill();process.wait();process.stdin.close();process.stdout.close()

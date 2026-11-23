@@ -23,6 +23,11 @@ def main():
         raw=sys.stdin.buffer.readline(65537)
         if len(raw)>65536:raise ValueError('request_too_large')
         request=json.loads(raw)
+        signer=request.pop('_signer',{})
+        for key in ('LAZYBUDDY_HONGGUO_SIGNER_URL','LAZYBUDDY_HONGGUO_SIGNER_TOKEN'):
+            if key in signer:
+                if not isinstance(signer[key],str):raise ValueError('media_request_failed')
+                os.environ[key]=signer[key]
         from lazybuddy_hongguo.backend import passport
         from lazybuddy_hongguo.backend.app_input import resolve
         def failure(error):

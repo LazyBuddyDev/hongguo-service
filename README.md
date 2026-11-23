@@ -19,6 +19,8 @@ python -B scripts/package-modules.py --output target/packages
 
 Packaging builds both bundled helpers from this checkout before staging. Use a new output directory for each package build.
 
+Hongguo 0.2.20 also installs the private [local signer runtime](docs/signer.md), including Java 21. Prepare it before packaging; users need no system Java or Docker.
+
 Private build inputs are separated inside this service repository:
 
 | Directory | Purpose | Explicit override |

@@ -95,7 +95,8 @@ class Media:
             result=Future()
             def read():
                 try:
-                    process=run_helper([str(helper)],input=wire,timeout=25,memory_limit=512*1024*1024,cancelled=cancelled)
+                    from .signer import local
+                    process=run_helper([str(helper)],input=wire,timeout=25,memory_limit=512*1024*1024,cancelled=cancelled,env=local.environment())
                     if process.returncode or len(process.stdout)>2*1024*1024:raise ValueError()
                     response=json.loads(process.stdout)
                     if response.get('ok') is not True or not isinstance(response.get('items'),list):raise ValueError()
@@ -217,7 +218,11 @@ class Media:
         try:
             self.input_job=Job()
             self.input_process=self.input_job.spawn([sys.executable,'-I','-B',str(Path(__file__).resolve().parent/'backend/input.py')])
-            self.input_process.stdin.write(wire);self.input_process.stdin.flush()
+            if os.environ.get('LAZYBUDDY_DEPENDENCY_HONGGUO_SIGNER_DIR'):
+                from .signer import local
+                local.prepare_input(self.input_process,wire,self.events,self.generation)
+            else:
+                self.input_process.stdin.write(wire);self.input_process.stdin.flush()
         except Exception:
             self.loading=False;self.stop_resources();raise
         generation=self.generation

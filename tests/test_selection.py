@@ -13,7 +13,7 @@ class Selection(unittest.TestCase):
 
     def test_backend_modules_select_the_tests_for_their_consumers(self):
         for source, tests in {
-            'account': {'test_account'},
+            'account': {'test_account','test_signer'},
             'passport': {'test_backend_probe'},
             'lease': {'test_account', 'test_cover_cache'},
             'media_container': {'test_backend_media', 'test_backend_progressive'},
