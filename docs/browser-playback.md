@@ -89,4 +89,6 @@ python -B scripts/verify/stage-browser-fixture.py --runtime-packages target/pack
 
 请求核对使用vendor/openhongguo/BRIEFDOCK.md所列固定版本第三方参考（不是官方API规范）：GET路径、业务字段、应用版本73932，以及query的_rticket与签名头时间同源。当前未确认服务端实时验签/放行要求。未引入参考中的身份轮换、跨主机回退或自动重试。发现SDK空CSRF占位与账号Cookie直接追加会重名，现按Cookie名称合并，账号值覆盖同名占位，保留现有设备的install_id/ttreq；这修复了请求构造风险，但尚无真实请求证据证明它是原200空体的根因。
 
+SDK 二次开发在 [LazyBuddyDev/openhongguo](https://github.com/LazyBuddyDev/openhongguo/tree/lazybuddy) 的 `lazybuddy` 分支维护。本服务通过 `vendor/openhongguo` 使用固定源码快照。迁移时的维护基线是 [475032c](https://github.com/LazyBuddyDev/openhongguo/commit/475032c98f0e8fd9f7b8aa4bc37c617c7231dc6f)。上游变更由 fork 的工作流提示，按实际影响审查并定向验证后再更新服务快照。
+
 收藏封面自0.2.13起按剧ID的哈希读取有界像素缓存，服务重建丢失来源表时仍可返回已缓存图片；未缓存或过期/损坏的图片且无已验证来源时返回cover_unavailable，不新增来源查询或自动刷新收藏。搜索封面沿用已有来源缓存，接口不暴露封面地址。
