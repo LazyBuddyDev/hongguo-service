@@ -15,9 +15,14 @@ from lazybuddy_hongguo.backend.progressive import Server
 
 class Account:
     sync_error=None
+    write_pending=False
+    stopping=False
     probe=SimpleNamespace(cancel=lambda:None)
     def __init__(self):self.state='idle';self.polls=0;self.favorites=[]
     def pending_progress(self):return False
+    def quiesce(self):pass
+    def pause_writes(self):pass
+    def resume_writes(self):pass
     def call(self,request):
         command=request['command']
         if command=='login':self.state='pending';self.polls=0
@@ -62,7 +67,7 @@ class Fixture(Media):
         return super().close(wait)
 
 def main():
-    def search(request):return dict(version=1,id=request['id'],ok=True,data=dict(items=[dict(id='123',title='测试短剧',episodes=1),dict(id='124',title='另一部短剧',episodes=1)],page=1,has_more=False))
+    def search(request,cancelled=None):return dict(version=1,id=request['id'],ok=True,data=dict(items=[dict(id='123',title='测试短剧',episodes=1),dict(id='124',title='另一部短剧',episodes=1)],page=1,has_more=False))
     service = Service(Account,search_factory=search,media_factory=Fixture)
     try:
         for line in sys.stdin.buffer:

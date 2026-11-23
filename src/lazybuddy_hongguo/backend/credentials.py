@@ -16,6 +16,13 @@ COOKIE_NAMES = {'sessionid', 'sessionid_ss', 'sid_tt', 'uid_tt', 'uid_tt_ss', 's
                 'passport_csrf_token', 'passport_csrf_token_default', 'passport_auth_status',
                 'passport_auth_status_ss'}
 
+def isolated_scope_valid():
+    return (os.environ.get('LAZYBUDDY_INSTANCE','default')=='default'
+            or PREFIX not in ('LazyBuddy/Hongguo','LazyBuddy/Hongguo/shell-preview'))
+
+def require_scope():
+    if not isolated_scope_valid():raise ValueError('invalid_credential_scope')
+
 class Credential(ctypes.Structure):
     _fields_ = [('Flags', wintypes.DWORD), ('Type', wintypes.DWORD), ('TargetName', wintypes.LPWSTR),
                 ('Comment', wintypes.LPWSTR), ('LastWritten', wintypes.FILETIME),
@@ -71,11 +78,13 @@ def _read(target):
 
 
 def read():
+    require_scope()
     record = _read(TARGET)
     return validate(record) if record is not None else None
 
 
 def save(record):
+    require_scope()
     validate(record)
     existing = read()
     if existing is not None and existing['uid'] != record['uid']:
@@ -98,10 +107,13 @@ def _write(target, record, comment):
 
 
 def delete():
-    record = read()
+    require_scope()
+    try:record=read()
+    except ValueError:record=None
+    # Explicit logout can remove a corrupt website record without guessing a device target.
+    _delete(TARGET)
     if record is not None:
         _delete(device_target(record['uid']))
-    _delete(TARGET)
 
 
 def _delete(target):
@@ -142,6 +154,7 @@ def validate_device(profile):
 
 
 def read_device(uid):
+    require_scope()
     record = _read(device_target(uid))
     if record is None:
         return None
@@ -151,8 +164,7 @@ def read_device(uid):
 
 
 def remember_device(uid, profile):
-    # Unscoped QA only reads the real device; a preview scope owns its cache.
-    if os.environ.get('LAZYBUDDY_INSTANCE', 'default') != 'default' and PREFIX=='LazyBuddy/Hongguo':
+    if not isolated_scope_valid():
         return False
     validate_device(profile)
     current = read()

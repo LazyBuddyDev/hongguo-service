@@ -19,6 +19,74 @@ class Source:
 
 
 class BrowserPlayback(unittest.TestCase):
+    def pair(self):
+        account=Mock(sync_error=None);account.probe.state='signed_in';account.probe.saved=True
+        account.pending_progress.return_value=False;account.current_identity.return_value=True
+        current=Media(account);current.browser=True;current.resource='current';current.arguments=dict(series='123',episode=1,quality='720p',origin=ORIGIN)
+        current.metadata=dict(series='123',episode=1,episodes=[1,3,4]);current.resolver=dict(owner='private',catalog=[])
+        candidate=Media(account)
+        def start(args,**_):
+            candidate.arguments=args;candidate.browser=True;candidate.metadata=dict(series='123',episode=3,episodes=[1,3,4]);candidate.loading=True
+        return current,candidate,start
+
+    def test_prefetch_is_one_verified_adjacent_episode_and_does_not_replace_current(self):
+        current,candidate,start=self.pair();generation=current.generation
+        with patch('lazybuddy_hongguo.media.Media',return_value=candidate),patch.object(candidate,'open',side_effect=start) as opened:
+            current.call('playback.prefetch',dict(session=generation));current.call('playback.prefetch',dict(session=generation))
+        self.assertEqual(opened.call_count,1);self.assertEqual(opened.call_args.kwargs,dict(browser=True,warmup=True))
+        self.assertEqual(candidate.arguments['episode'],3);self.assertEqual(current.resource,'current');self.assertEqual(current.generation,generation)
+        self.assertIsNone(current.recorded);self.assertIsNone(candidate.recorded)
+        with self.assertRaises(ValueError):current.call('playback.prefetch',dict(session=generation-1))
+        current.cancel_prefetch()
+
+    def test_ready_or_inflight_prefetch_is_adopted_without_second_open(self):
+        for ready in (True,False):
+            current,candidate,start=self.pair();start(dict(series='123',episode=3,quality='720p',origin=ORIGIN))
+            candidate.resolver=current.resolver;candidate.resource='prepared' if ready else None;candidate.loading=not ready;current.next_media=candidate
+            session=candidate.generation
+            with patch('lazybuddy_hongguo.media.Job',side_effect=AssertionError('must reuse input pipeline')):
+                state=current.open(candidate.arguments,browser=True)
+            self.assertEqual(state['session'],session);self.assertEqual(state['prepared'],ready);self.assertEqual(state['loading'],not ready)
+            self.assertIsNone(current.next_media);self.assertIsNone(current.recorded)
+
+    def test_failed_prefetch_does_not_break_current_or_retry_at_handoff(self):
+        current,candidate,start=self.pair();start(dict(series='123',episode=3,quality='720p',origin=ORIGIN));candidate.resolver=current.resolver
+        candidate.loading=False;candidate.error='media_access_denied';current.next_media=candidate
+        self.assertIsNone(current.state()['error']);self.assertEqual(current.resource,'current')
+        with patch('lazybuddy_hongguo.media.Job',side_effect=AssertionError('denied source cannot retry')):
+            state=current.open(candidate.arguments,browser=True)
+        self.assertEqual(state['error'],'media_access_denied');self.assertFalse(state['loading'])
+
+    def test_cancel_stops_candidate_and_late_events_cannot_repopulate_it(self):
+        current,candidate,start=self.pair();start(dict(series='123',episode=3,quality='720p',origin=ORIGIN));current.next_media=candidate
+        generation=candidate.generation;job=Mock();candidate.input_job=job
+        current.cancel_prefetch();job.close.assert_called_once();self.assertIsNone(current.next_media)
+        candidate.events.put((generation,dict(ok=True)));candidate.pump();self.assertIsNone(candidate.resource)
+        self.assertEqual(current.resource,'current')
+
+    def test_suspend_cancels_next_but_keeps_current_resource_and_no_resume_prefetch(self):
+        current,candidate,start=self.pair();start(dict(series='123',episode=3,quality='720p',origin=ORIGIN));current.next_media=candidate
+        current.resource=self.server.address;session=current.generation
+        current.call('playback.suspend',dict(session=session));self.assertIsNone(current.next_media);self.assertTrue(current.suspended)
+        self.assertEqual(current.resource,self.server.address)
+        with patch('lazybuddy_hongguo.media.Media',side_effect=AssertionError('no hidden/resume preparation')):
+            current.call('playback.prefetch',dict(session=session));current.call('playback.resume',dict(session=session))
+        self.assertIsNone(current.next_media)
+
+    def test_quality_change_discards_candidate_and_final_episode_never_prefetches(self):
+        current,candidate,start=self.pair();start(dict(series='123',episode=3,quality='720p',origin=ORIGIN));current.next_media=candidate
+        with patch.object(candidate,'close') as closed,patch('lazybuddy_hongguo.media.Job',side_effect=ValueError('fixture stop')):
+            with self.assertRaises(ValueError):current.open(dict(series='123',episode=3,quality='1080p',origin=ORIGIN),browser=True)
+        closed.assert_called_once();self.assertIsNone(current.next_media)
+        current.browser=True;current.resource='current';current.loading=False;current.metadata['episode']=4
+        with patch('lazybuddy_hongguo.media.Media',side_effect=AssertionError('last episode has no next')):current.prefetch()
+
+    def test_candidate_cannot_be_adopted_by_another_account(self):
+        current,candidate,start=self.pair();start(dict(series='123',episode=3,quality='720p',origin=ORIGIN));candidate.resolver=current.resolver
+        current.next_media=candidate;current.account.current_identity.return_value=False
+        with self.assertRaisesRegex(ValueError,'saved_session_verification_failed'):current.open(candidate.arguments,browser=True)
+        self.assertIsNone(current.next_media)
+
     def test_browser_error_returns_diagnostics_without_rebuilding_resource(self):
         media=Media(Mock(sync_error=None));media.browser=True;media.resource='fixture';media.metadata={'series':'123','episode':1};media.arguments={'quality':'720p'}
         reply=media.call('playback.report_error',dict(session=media.generation,code=4))

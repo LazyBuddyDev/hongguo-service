@@ -353,7 +353,7 @@ func main() {
 	result, err := resolve(input)
 	if err != nil {
 		code := "app_source_unavailable"
-		for _, v := range []string{"invalid_request", "saved_credentials_missing", "invalid_saved_session", "episode_unavailable", "quality_unavailable", "unsupported_media_layout", "unsupported_wrapped_material", "media_source_rejected", "playback_episode_mismatch"} {
+		for _, v := range []string{"invalid_request", "invalid_catalog", "saved_credentials_missing", "invalid_saved_session", "episode_unavailable", "quality_unavailable", "unsupported_media_layout", "unsupported_wrapped_material", "media_source_rejected", "playback_episode_mismatch"} {
 			if err.Error() == v {
 				code = v
 			}

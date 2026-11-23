@@ -1,21 +1,35 @@
 """Fixed App media with offset-preserving sample processing and a bounded Range cache."""
 import re,urllib.request,urllib.parse,urllib.error,http.server,http.client,ssl,secrets,threading,bisect,collections
-from .media_container import boxes,only,uint,byte_range,Cipher,algorithms,modes
+from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
+from .media_container import boxes,only,uint,byte_range
 from lazybuddy_hongguo.diagnostics import failure
 
-def allowed(url):
+MEDIA_SCHEDULER = re.compile(r'v[0-9]+-(?:ex-)?reading-video(?:-[a-z]|cdn(?:302)?)?\.qznovelvod\.com')
+DELEGATED_CDN_NODE = re.compile(
+    r'(?:[a-z0-9]{40,63}\.(?:vegslb|bdcgslb)\.com|[a-f0-9]{40,63}\.v\.smtcdns\.com)'
+)
+
+
+def allowed(url,source=None):
     try:
         u=urllib.parse.urlsplit(url)
-        return u.scheme=='https' and u.hostname and u.hostname.endswith('.qznovelvod.com') and u.port in (None,443) and not u.username and not u.password and not u.fragment
+        if not (u.scheme=='https' and u.hostname and u.port in (None,443) and u.username is None and not u.fragment):return False
+        if u.hostname.endswith('.qznovelvod.com'):return True
+        if not source or not allowed(source):return False
+        # A qualified CDN node is reachable only through the original media scheduler.
+        return bool(MEDIA_SCHEDULER.fullmatch(urllib.parse.urlsplit(source).hostname)
+                    and DELEGATED_CDN_NODE.fullmatch(u.hostname))
     except ValueError:return False
+
+
 class Redirect(urllib.request.HTTPRedirectHandler):
-    def __init__(self,context=None):self.context=context
+    def __init__(self,context=None,source=None):self.context,self.source=context,source
     def redirect_request(self,req,fp,code,msg,headers,url):
-        check_redirect(url,context=self.context,status=code,source=req.full_url)
+        check_redirect(url,context=self.context,status=code,source=self.source or req.full_url)
         return super().redirect_request(req,fp,code,msg,headers,url)
 
 def check_redirect(url,**details):
-    if not allowed(url):
+    if not allowed(url,details.get('source')):
         reason='media_redirect_https_required' if url.lower().startswith('http:') else 'media_redirect_target_rejected'
         raise failure(reason,stage='redirect',target=url,**details)
 
@@ -29,7 +43,7 @@ class Source:
         self.context=context
         self.connection=None;self.origin=None;self.tls=ssl.create_default_context()
         self.proxy=bool(urllib.request.getproxies().get('https'))
-        self.opener=urllib.request.build_opener(Redirect(context),urllib.request.HTTPSHandler(context=self.tls))
+        self.opener=urllib.request.build_opener(Redirect(context,url),urllib.request.HTTPSHandler(context=self.tls))
         self.lock=threading.Lock();self.cache=collections.OrderedDict();self.spans=[];self.tracks=set()
         prefix=self.fetch(0,self.INITIAL-1)
         top=[];pos=0
@@ -180,7 +194,8 @@ class Source:
         out=bytearray(data);end=start+len(out)
         lo=max(start,self.moov_offset);hi=min(end,self.moov_offset+len(self.moov))
         if lo<hi:out[lo-start:hi-start]=self.moov[lo-self.moov_offset:hi-self.moov_offset]
-        for a,b,iv,offset in self.spans[bisect.bisect_right(self.ends,start):]:
+        for i in range(bisect.bisect_right(self.ends,start),len(self.spans)):
+            a,b,iv,offset=self.spans[i]
             if a>=end:break
             lo=max(start,a);hi=min(end,b);offset+=lo-a
             counter=(int.from_bytes(iv,'big')+offset//16)%(1<<128)
@@ -207,12 +222,38 @@ class Source:
                 size=min(end-start+1,len(value)-(start-block));result=value[start-block:start-block+size]
             if cancelled():return
             yield result;start+=size
+    def warmup(self):
+        # One bounded startup buffer, retained only in the existing memory cache.
+        for _ in self.read(0,min(self.total,1024*1024)-1):pass
+
     def stats(self):
         with self.lock:return {'file_bytes':self.total,'downloaded_bytes':self.downloaded,'metadata_bytes':len(self.moov),'cache_bytes':sum(map(len,self.cache.values())),'cache_limit':8*self.BLOCK,'range_requests':self.requests,'samples_encrypted':len(self.spans)}
 
+class BoundedHTTPServer(http.server.ThreadingHTTPServer):
+    daemon_threads=True
+
+    def __init__(self,address,handler):
+        self.workers=threading.BoundedSemaphore(12)
+        super().__init__(address,handler)
+
+    def process_request(self,request,address):
+        if not self.workers.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:super().process_request(request,address)
+        except BaseException:
+            self.workers.release()
+            raise
+
+    def process_request_thread(self,request,address):
+        try:super().process_request_thread(request,address)
+        finally:self.workers.release()
+
+
 class Server:
     def __init__(self,source,on_error=None,origin=None):
-        self.source=source;self.origin=origin;self.active=True;self.token=secrets.token_urlsafe(32);self.generation=0;self.reader_lock=threading.Lock();self.error_lock=threading.Lock();self.error_notified=False;owner=self
+        self.source=source;self.origin=origin;self.active=True;self.closed=False;self.token=secrets.token_urlsafe(32);self.generation=0;self.reader_lock=threading.Lock();self.error_notified=False;owner=self
+        self.readers=threading.BoundedSemaphore(4)
         class Handler(http.server.BaseHTTPRequestHandler):
             def setup(self):
                 super().setup();self.connection.settimeout(5)
@@ -235,37 +276,49 @@ class Server:
                 if self.headers.get('Content-Length') not in ('6','7'):self.send_error(400);return
                 command=self.rfile.read(int(self.headers['Content-Length']))
                 if command not in (b'suspend',b'resume'):self.send_error(400);return
-                with owner.reader_lock:owner.active=command==b'resume';owner.generation+=1
+                with owner.reader_lock:
+                    closed=owner.closed
+                    if not closed:owner.active=command==b'resume';owner.generation+=1
+                if closed:self.send_error(409);return
                 self.send_response(204);self.send_header('Content-Length','0');self.end_headers()
             def respond(self,body):
                 if not self.target():self.send_error(404);return
                 if owner.origin and self.headers.get('Origin')!=owner.origin:self.send_error(403);return
-                if not owner.active:self.send_error(409);return
-                try:lo,hi=byte_range(self.headers.get('Range'),source.total)
-                except ValueError:self.send_error(416);return
-                if body:
+                if body and not owner.readers.acquire(blocking=False):self.send_error(503);return
+                try:
                     with owner.reader_lock:
-                        # Browsers can concurrently read an index and media range.
-                        # Only lifecycle changes invalidate browser reads.
-                        if owner.origin is None:owner.generation+=1
+                        active=owner.active
+                        if active and body and owner.origin is None:owner.generation+=1
                         generation=owner.generation
+                    if not active:self.send_error(409);return
+                    try:lo,hi=byte_range(self.headers.get('Range'),source.total)
+                    except ValueError:self.send_error(416);return
+                    self.stream(lo,hi,generation,body)
+                finally:
+                    if body:owner.readers.release()
+            def stream(self,lo,hi,generation,body):
                 partial=self.headers.get('Range') is not None
                 self.send_response(206 if partial else 200);self.cors();self.send_header('Content-Length',str(hi-lo+1));self.send_header('Content-Type','video/mp4');self.send_header('Accept-Ranges','bytes');self.send_header('Cache-Control','no-store');self.send_header('Connection','close')
                 if partial:self.send_header('Content-Range',f'bytes {lo}-{hi}/{source.total}')
                 self.end_headers()
                 if body:
                     try:
-                        for data in source.read(lo,hi,lambda:generation!=owner.generation or not owner.active):self.wfile.write(data)
+                        def cancelled():return generation!=owner.generation or not owner.active
+                        for data in source.read(lo,hi,cancelled):
+                            if cancelled():break
+                            self.wfile.write(data)
                     except OSError:pass
                     except ValueError as error:
-                        source.error=str(error)
-                        with owner.error_lock:
-                            if on_error and not owner.error_notified:owner.error_notified=True;on_error(error)
+                        with owner.reader_lock:
+                            notify=not cancelled() and on_error and not owner.error_notified
+                            if not cancelled():source.error=str(error)
+                            if notify:owner.error_notified=True
+                        if notify:on_error(error)
                 self.close_connection=True
-        self.server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler);self.server.daemon_threads=True
+        self.server=BoundedHTTPServer(('127.0.0.1',0),Handler)
         self.host=f'127.0.0.1:{self.server.server_port}';self.address='http://'+self.host+'/'+self.token+'/stream.mp4'
     def serve(self):self.server.serve_forever()
     def close(self):
-        self.active=False;self.generation+=1
+        with self.reader_lock:self.closed=True;self.active=False;self.generation+=1
         self.server.server_close()
         if getattr(self.source,'connection',None) is not None:self.source.connection.close()

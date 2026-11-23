@@ -36,11 +36,12 @@ class Media:
         self.last_saved=time.monotonic()
         self.flush_guard=threading.Lock()
         self.flush_thread=None
-        self.flush_again=False
+        self.flush_again=None
         self.browser=False
         self.resource=None
         self.suspended=False
         self.browser_final=None
+        self.next_media=None
 
     def call(self,method,args):
         if method.startswith('playback.'):return self.playback(method,args)
@@ -69,12 +70,18 @@ class Media:
         self.pump()
         if not self.browser:raise ValueError('media_not_loaded')
         if method!='playback.status' and (type(args.get('session')) is not int or args['session']!=self.generation):raise ValueError('media_not_loaded')
+        if method=='playback.prefetch':return self.prefetch()
+        if method=='playback.prefetch_cancel':self.cancel_prefetch(preserve_failure=True);return self.state()
         if method=='playback.report_error':
             if type(args.get('code')) is not int or args['code'] not in (1,2,3,4):raise ValueError('media_request_failed')
             from .diagnostics import describe
             self.diagnostic=describe('browser_media_error',stage='browser',context={**self.metadata,'quality':self.arguments.get('quality')},browser_code=args['code'])
             return self.state()
-        if method=='playback.close':self.close(wait=False);return self.state()
+        if method=='playback.close':
+            self.account.pause_writes()
+            self.close(wait=False)
+            self.account.resume_writes()
+            return self.state()
         if method=='playback.status':return self.state()
         if method=='playback.checkpoint':
             if 'final' in args and type(args['final']) is not bool:raise ValueError('media_request_failed')
@@ -86,16 +93,38 @@ class Media:
                 self.browser_final=self.recorded;self.flush()
             return self.state()
         if method in ('playback.suspend','playback.resume'):
+            if method=='playback.suspend':
+                self.account.pause_writes()
+                self.cancel_prefetch(preserve_failure=True)
             if self.loading:self.close(wait=False);return self.state()
             if not self.resource:raise ValueError('media_not_loaded')
             request=urllib.request.Request(self.resource,data=b'suspend' if method.endswith('suspend') else b'resume',method='POST')
             with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request,timeout=5) as response:
                 if response.status!=204:raise ValueError('media_state_failed')
             self.suspended=method.endswith('suspend')
+            if not self.suspended:self.account.resume_writes()
             return self.state()
         raise ValueError('media_request_failed')
 
-    def open(self,args,browser=False):
+    def cancel_prefetch(self,preserve_failure=False):
+        candidate=self.next_media
+        self.next_media=None
+        if candidate is not None:
+            candidate.pump()
+            candidate.close(wait=False)
+            if preserve_failure and candidate.error:self.next_media=candidate
+
+    def prefetch(self):
+        if self.suspended or self.loading or self.error or not self.resource:return self.state()
+        available=sorted(n for n in self.metadata.get('episodes',[]) if n>self.metadata['episode'])
+        if not available or self.next_media is not None:return self.state()
+        candidate=Media(self.account)
+        candidate.resolver=self.resolver
+        candidate.open(dict(series=self.metadata['series'],episode=available[0],quality=self.arguments.get('quality','720p'),origin=self.arguments['origin']),browser=True,warmup=True)
+        self.next_media=candidate
+        return self.state()
+
+    def open(self,args,browser=False,warmup=False):
         if browser:
             origin=args.get('origin')
             if not isinstance(origin,str) or len(origin)>2048:raise ValueError('media_request_failed')
@@ -113,6 +142,25 @@ class Media:
         for option,(minimum,maximum) in {'position':(0,86400),'volume':(0,1),'speed':(0.25,4)}.items():
             if option in args and (type(args[option]) not in (int,float) or not math.isfinite(args[option]) or not minimum<=args[option]<=maximum):raise ValueError('media_request_failed')
         if 'mute' in args and type(args['mute']) is not bool:raise ValueError('media_request_failed')
+        args=dict(args,quality=quality)
+        refresh=args.get('refresh_catalog',False)
+        if type(refresh) is not bool:raise ValueError('media_request_failed')
+        refresh=refresh or (self.error is not None and self.metadata.get('series')==series and self.metadata.get('episode')==episode)
+        if not warmup:self.account.resume_writes()
+        candidate=self.next_media
+        self.next_media=None
+        if candidate is not None:
+            candidate.pump()
+            if browser and not refresh and all(candidate.arguments.get(key)==args.get(key) for key in ('series','episode','quality','origin')):
+                if not self.account.current_identity((candidate.resolver or {}).get('owner')):
+                    candidate.close(wait=False);raise ValueError('saved_session_verification_failed')
+                self.close(wait=False)
+                # Move only the prepared pipeline; progress writers remain owned by this instance.
+                for key in ('generation','events','input_job','input_process','input_reader','metadata','arguments','resolver','loading','error','diagnostic','browser','resource','suspended'):
+                    setattr(self,key,getattr(candidate,key))
+                self.recorded=self.browser_final=None
+                return self.state()
+            candidate.close(wait=False)
         self.browser=browser
         self.close(wait=False)
         self.browser=browser;self.suspended=False
@@ -120,7 +168,8 @@ class Media:
         self.metadata.update(series=series,episode=episode)
         self.arguments=args.copy()
         self.error=None;self.diagnostic=None;self.loading=True
-        wire=(json.dumps(dict(series=series,episode=episode,quality=quality,resolver=self.resolver,**({'origin':origin} if browser else {})),separators=(',',':'))+'\n').encode()
+        resolver={**self.resolver,'catalog':[]} if refresh and self.resolver else self.resolver
+        wire=(json.dumps(dict(series=series,episode=episode,quality=quality,resolver=resolver,**({'origin':origin,'warmup':warmup} if browser else {})),separators=(',',':'))+'\n').encode()
         if len(wire)>65536:self.loading=False;raise ValueError('resolver_session_too_large')
         try:
             self.input_job=Job()
@@ -236,21 +285,25 @@ class Media:
     def flush(self):
         if not self.account.pending_progress():return None
         with self.flush_guard:
-            if self.flush_thread is not None:self.flush_again=True;return self.flush_thread
+            epoch=self.account.lifecycle_epoch
+            if self.account.stopping:return None
+            if self.flush_thread is not None:self.flush_again=epoch;return self.flush_thread
             def work():
+                current_epoch=epoch
                 while True:
-                    try:self.account.call(dict(command='sync',flush=True))
+                    try:self.account.call(dict(command='sync',flush=True,epoch=current_epoch))
                     except Exception:self.local_error='progress_sync_failed'
                     with self.flush_guard:
-                        if not self.flush_again:self.flush_thread=None;return
-                        self.flush_again=False
+                        if self.flush_again is None:self.flush_thread=None;return
+                        current_epoch,self.flush_again=self.flush_again,None
             thread=threading.Thread(target=work,daemon=True)
             self.flush_thread=thread;thread.start()
             return thread
 
     def close(self,wait=True):
+        self.cancel_prefetch()
         self.loading=False;self.pending_play=False
-        if self.process:
+        if self.process and not self.account.stopping:
             try:
                 if self.request('status',{}).get('loaded'):self.checkpoint(self.request('pause',{}))
             except Exception:pass
@@ -266,15 +319,21 @@ class Media:
     def stop_resources(self):
         self.generation+=1
         self.resource=None
+        retiring=[]
         for prefix in ('decoder','input'):
             job=getattr(self,prefix+'_job')
             process=self.process if prefix=='decoder' else self.input_process
             reader=getattr(self,prefix+'_reader')
-            if job:job.stop()
-            if process:process.wait(timeout=5)
-            if reader:reader.join(timeout=5)
-            if process:process.stdin.close();process.stdout.close()
             if job:job.close()
+            if process:retiring.append((process,reader))
             setattr(self,prefix+'_job',None);setattr(self,prefix+'_reader',None)
         self.process=self.input_process=None
         self.replies=queue.Queue(maxsize=1)
+        if retiring:
+            def reap():
+                for process,reader in retiring:
+                    try:process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:continue
+                    if reader:reader.join(timeout=1)
+                    process.stdin.close();process.stdout.close()
+            threading.Thread(target=reap,daemon=True).start()

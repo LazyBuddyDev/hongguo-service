@@ -13,11 +13,11 @@ For source runs set PYTHONPATH=src and run `python -m lazybuddy_hongguo`; health
 Build feature/runtime packages independently:
 
 ```powershell
-cargo build --release --locked --manifest-path search/Cargo.toml
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-hongguo-resolver.ps1
 python -B scripts/prepare-module-runtimes.py
 python -B scripts/package-modules.py --output target/packages
 ```
+
+Packaging builds both bundled helpers from this checkout before staging. Use a new output directory for each package build.
 
 Private build inputs are separated inside this service repository:
 

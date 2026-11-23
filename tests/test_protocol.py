@@ -5,6 +5,8 @@ from lazybuddy_hongguo.protocol import Service
 
 
 class Backend:
+    write_pending=False
+    def quiesce(self):pass
     def call(self, request):
         return dict(state='signed_in', name='fixture', qr=[], favorites=[dict(id='1', title='fixture',
             cover='SECRET_SIGNED_URL', cookies='SECRET_COOKIE')], owner='SECRET_UID',
@@ -12,6 +14,35 @@ class Backend:
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_deferred_search_releases_control_and_discarded_covers_stay_private(self):
+        entered=threading.Event();release=threading.Event()
+        def search(request,cancelled):
+            entered.set();release.wait(2)
+            return dict(ok=True,data=dict(items=[dict(id='1',_cover='private')]))
+        service=Service(Backend,search)
+        def call(operation,**args):return service.handle(dict(version=1,id='fixture',method=operation,args=args))
+        job=call('work.begin',method='search',args={'query':'test'})['data']['job']
+        try:
+            self.assertTrue(entered.wait(1))
+            self.assertTrue(call('work.status',job=job)['data']['pending'])
+            self.assertTrue(call('lifecycle.suspend')['ok'])
+            self.assertEqual(call('work.status',job=job)['error']['code'],'work_cancelled')
+        finally:
+            release.set()
+            for work in service.work.values():work.thread.join(2)
+        self.assertFalse(service.covers)
+
+    def test_close_has_one_budget_for_in_flight_account_writes(self):
+        release=threading.Event()
+        service=Service(Backend);service.account=Backend();service.account.write_pending=True
+        service.account.probe=type('Probe',(),{'cancel':lambda self:None})()
+        worker=threading.Thread(target=release.wait,daemon=True)
+        worker.start();service.operation=(worker,None,'favorites.set')
+        try:
+            service.close(timeout=.01)
+            self.assertTrue(worker.is_alive())
+            self.assertIsNone(service.account)
+        finally:release.set();worker.join(2)
     def test_cloud_progress_is_async_and_local_snapshot_remains_available(self):
         entered=threading.Event();release=threading.Event()
         class Account(Backend):
@@ -43,7 +74,8 @@ class ProtocolTests(unittest.TestCase):
                 @staticmethod
                 def cancel():pass
             def call(self,request):
-                if request['command']=='favorite_set':entered.set();release.wait(2)
+                if request['command']=='favorite_set':
+                    self.write_pending=True;entered.set();release.wait(2);self.write_pending=False
                 return super().call(request)
         class Media:
             def __init__(self,account):pass

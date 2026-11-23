@@ -197,93 +197,6 @@ pub fn search(
     unreachable!()
 }
 
-#[derive(Default)]
-pub struct Search {
-    pub input: String,
-    pub keyword: String,
-    pub items: Vec<Drama>,
-    pub page: u32,
-    pub has_more: bool,
-    pub pending: Option<u32>,
-    pub loading: bool,
-    pub error: Option<SearchError>,
-    pub generation: u64,
-    pub scroll: f32,
-}
-impl Search {
-    pub fn begin(&mut self, more: bool) -> Result<(u64, String, u32), SearchError> {
-        let keyword = if more {
-            &self.keyword
-        } else {
-            query(&self.input)?
-        }
-        .to_owned();
-        let page = if more {
-            if self.loading || !self.has_more {
-                return Err(SearchError::InvalidQuery);
-            }
-            self.page + 1
-        } else {
-            1
-        };
-        if !more {
-            self.keyword = keyword.clone();
-            self.items.clear();
-            self.page = 0;
-            self.has_more = false;
-            self.scroll = 0.0;
-        }
-        self.generation += 1;
-        self.loading = true;
-        self.pending = Some(page);
-        self.error = None;
-        Ok((self.generation, keyword, page))
-    }
-    pub fn pause(&mut self) {
-        self.generation += 1;
-        self.loading = false;
-    }
-    pub fn resume(&mut self) -> Option<(u64, String, u32)> {
-        let page = self.pending?;
-        if self.loading || self.error.is_some() {
-            return None;
-        }
-        self.generation += 1;
-        self.loading = true;
-        Some((self.generation, self.keyword.clone(), page))
-    }
-    pub fn complete(&mut self, generation: u64, result: Result<SearchPage, SearchError>) -> bool {
-        if generation != self.generation || !self.loading {
-            return false;
-        }
-        self.loading = false;
-        self.pending = None;
-        match result {
-            Ok(page) => {
-                let existing: HashSet<_> = self.items.iter().map(|i| i.id.clone()).collect();
-                let added: Vec<_> = page
-                    .items
-                    .into_iter()
-                    .filter(|i| !existing.contains(&i.id))
-                    .collect();
-                if page.page > 1 && page.has_more && added.is_empty() {
-                    self.error = Some(SearchError::InvalidResponse);
-                    return true;
-                }
-                self.items.extend(added);
-                self.page = page.page;
-                self.has_more = page.has_more;
-                self.pending = None;
-            }
-            Err(error) => {
-                self.error = Some(error);
-                self.pending = None;
-            }
-        }
-        true
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,62 +275,11 @@ mod tests {
         assert!(query(&"字".repeat(81)).is_err());
     }
     #[test]
-    fn pause_and_new_search_discard_old_replies_and_preserve_results() {
-        let mut s = Search {
-            input: "关键词".into(),
-            ..Search::default()
-        };
-        let (old, _, _) = s.begin(false).unwrap();
-        s.pause();
-        assert!(!s.complete(old, Ok(page("123"))));
-        assert!(s.items.is_empty());
-        let (new, _, _) = s.begin(false).unwrap();
-        assert!(s.complete(new, Ok(page("123"))));
-        s.pause();
-        assert_eq!(s.items.len(), 1);
-        s.input = "新词".into();
-        let (third, _, _) = s.begin(false).unwrap();
-        assert!(!s.complete(new, Ok(page("456"))));
-        assert!(s.items.is_empty());
-        assert!(s.complete(third, Err(SearchError::Network)));
-        assert_eq!(s.error, Some(SearchError::Network));
-    }
-    #[test]
-    fn resume_reissues_only_interrupted_work_and_rejects_pre_pause_generation() {
-        let mut search = Search {
-            input: "示例".into(),
-            ..Search::default()
-        };
-        let (old, _, _) = search.begin(false).unwrap();
-        search.pause();
-        let (new, keyword, page_number) = search.resume().unwrap();
-        assert_eq!(keyword, "示例");
-        assert_eq!(page_number, 1);
-        assert!(search.resume().is_none());
-        assert!(!search.complete(old, Ok(page("123"))));
-        assert!(search.complete(new, Ok(page("456"))));
-        search.pause();
-        assert!(search.resume().is_none());
-        assert_eq!(search.items[0].id, "456");
-    }
-    #[test]
-    fn non_video_rows_are_ignored_and_repeating_pages_do_not_discard_results() {
+    fn non_video_rows_are_ignored_and_duplicate_ids_are_filtered() {
         let empty=parse(r#"{"searchList":[{"video_data":null},{"actor_data":{}}],"hasMore":false,"pageNum":1,"totalPages":1}"#,1).unwrap();
         assert!(empty.items.is_empty());
-        let mut search = Search {
-            input: "示例".into(),
-            ..Search::default()
-        };
-        let (first, _, _) = search.begin(false).unwrap();
-        search.complete(first, Ok(page("123")));
-        let (second, _, _) = search.begin(true).unwrap();
-        let mut duplicate = page("123");
-        duplicate.page = 2;
-        search.complete(second, Ok(duplicate));
-        assert_eq!(search.items.len(), 1);
-        assert_eq!(search.page, 1);
-        assert_eq!(search.error, Some(SearchError::InvalidResponse));
-        assert!(search.pending.is_none());
+        let duplicate=parse(r#"{"searchList":[{"video_data":{"series_id":"123","series_title":"A"}},{"video_data":{"series_id":"123","series_title":"B"}}],"hasMore":false,"pageNum":1,"totalPages":1}"#,1).unwrap();
+        assert_eq!(duplicate.items.len(), 1);
     }
 }
 

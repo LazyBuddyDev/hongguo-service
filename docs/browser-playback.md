@@ -8,7 +8,9 @@
 
 | 方法 | 参数 | 结果 |
 | --- | --- | --- |
-| `playback.open` | 字符串`series`、整数`episode`、可选字符串`quality`、明确`origin` | 新会话代数与loading状态 |
+| `playback.open` | 字符串`series`、整数`episode`、可选字符串`quality`、可选布尔`refresh_catalog`、明确`origin` | 新会话代数与loading状态 |
+| `playback.prefetch` | 当前整数`session` | 异步准备已验证目录中的唯一下一集，返回当前会话状态，不切换或暴露候选资源 |
+| `playback.prefetch_cancel` | 当前整数`session` | 取消候选准备与缓存，不改变当前集 |
 | `playback.status` | 无 | 当前loading/prepared/error、目录与资源 |
 | `playback.report_error` | 整数`session`、浏览器媒体错误`code`（1–4） | 记录所属会话错误 |
 | `playback.suspend/resume` | 整数`session` | 停止/允许资源读取，加载中suspend取消准备 |
@@ -19,25 +21,43 @@
 
 接受open不代表浏览器已解码。仅当前可见页面轮询准备状态；用`loadedmetadata`、实际尺寸、帧回调`mediaTime`、媒体error与真实EOS反馈播放。请求seek目标、滑块预览或服务声明时长不能代替已观看帧时间。
 
+分集目录最多复用120秒。目标集缺失、手动重试同一失败集或明确传入`refresh_catalog: true`时重新读取目录；已验证设备档案可继续复用。
+
+## 下一集准备
+
+0.2.14起，客户端在当前集有实际播放帧后，每个会话最多调用一次prefetch；末集、暂停/隐藏及非活动页不派发。服务只接受所属当前session，按已确认可用目录选取紧邻下一集，沿用当前账号、清晰度偏好与Origin；在独立Job中验证该集身份/权限，异步取源并缓存前1MiB，包含媒体初始化信息。至多一个候选输入进程，不启动解码器、不全片下载、不落盘，也不生成候选观看进度。
+
+下一次open只在剧、集、清晰度偏好、Origin及当前身份匹配时接用候选会话；候选仍准备中则继续等待同一次准备，不另起取源。真实EOS才允许自动切集，不用时间阈值推断结束。显式选集也可接用匹配候选；换剧/其他集/清晰度变化释放不匹配候选。原会话最终断点只提交一次，候选准备与真实观看记录分离。
+
+suspend、close、账号切换及页面释放取消候选及其进程树；恢复不自动重新预加载或播放。预加载失败不改变当前播放；下一集被明确拒绝时保留失败到接用，不自动重试取源。取消代数后的结果不能恢复资源或填入新缓存。实际首帧切换仍包含浏览器加载/解码开销，不能宣称无缝切换。
+
 ## 本地媒体资源
 
 URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不能持久化、输出到公开状态或日志。只允许open明确传入的Origin、精确Host及固定路径。浏览器使用CORS模式，例如`<video crossorigin="anonymous">`。
 
 支持GET、HEAD、单Range与OPTIONS；服务私有POST控制不能由携带浏览器Origin/Sec-Fetch的请求调用。资源只能读取当前固定媒体，不提供任意URL代理。上游签名、Cookie、密钥与明文媒体不落盘、不进入命令行；资源读取、响应、缓存及尺寸均受界限约束。
 
+每个资源最多12个连接处理线程，其中最多4个可同时读取媒体。暂停、恢复和关闭在同一锁内更新读取状态与代数。
+
 ## 生命周期与进度
 
 隐藏时先暂停并卸载浏览器src，再suspend资源读取。已有上游读取最多等现有有界超时，取消代数下不得填新缓存或派生后续读取。恢复同一资源和实际位置但保持暂停，用户明确播放才继续。
 
-切根页面、打开设置或退出时close所属会话与进程树。session跨进程启动随机化，checkpoint、close、suspend和resume核对代数；旧页面不能关闭新播放器或覆盖其进度。相同最终检查点不重复提交云端。生命周期动作保留用户倍速、音量与静音。
+取源及辅助进程归所属 Windows Job，独立服务运行也须回收自身进程树。切根页面、打开设置或退出时 close 所属会话。session跨进程启动随机化，checkpoint、close、suspend和resume核对代数；旧页面不能关闭新播放器或覆盖其进度。相同最终检查点不重复提交云端。生命周期动作保留用户倍速、音量与静音。
 
-`LAZYBUDDY_CREDENTIAL_SCOPE`可隔离Windows凭据和设备目标，允许1–48个小写字母、数字或连字符；未设置时使用服务默认生产命名空间。真实宿主的数据目录与scope由宿主管理，不能因仓库整理复制凭据。测试使用显式独立目录及scope，不复用真实账号。
+`LAZYBUDDY_CREDENTIAL_SCOPE`隔离Windows凭据和设备目标，允许1–48个小写字母、数字或连字符。`LAZYBUDDY_INSTANCE`为`default`或未设置时可使用默认凭据空间，也可由宿主指定其既有的`shell-preview`。其他实例必须显式指定独立scope，并使用独立数据目录。
+
+已有桌面安装需要同时更新宿主与0.2.18服务。更新后的宿主继续使用既有生产凭据空间，并仍可连接0.2.17服务。
 
 ## 网络与故障诊断
 
 服务启动时将所选http/https/all/no代理设置转给自身辅助进程，使Go与Python路由一致，保留显式环境覆盖。宿主「是否直连」清除本服务代理并设置`NO_PROXY=*`，关闭后重建服务跟随系统/环境设置；不修改机器或Clash配置，也不能据此声称绕过TUN路由。
 
-取源及辅助进程归所属 Windows Job，独立运行也须在退出时回收进程树。取源前检查已验证端点，CDN 逐跳校验 HTTPS 及允许来源，不附账号 Cookie 或网页 Referer。401 或 403 后停止该来源。错误细分为`media_redirect_https_required`、`media_redirect_target_rejected`、`media_redirect_missing_location`、`media_redirect_limit`；旧`media_redirect_rejected`仍可显示。不能为偶发故障放宽来源、增加自动重试或更换身份。手动重试由当前用户明确发起，保留当前剧名、集数、已知位置及脱敏错误类别。
+取源前检查已验证端点，CDN逐跳校验HTTPS及允许来源，不附账号Cookie或网页Referer。错误细分为`media_redirect_https_required`、`media_redirect_target_rejected`、`media_redirect_missing_location`、`media_redirect_limit`；旧`media_redirect_rejected`仍可显示。不能为偶发故障无条件放宽来源、增加自动重试或更换身份。401 或 403 后结束失败来源。手动重试由用户明确发起，保留当前剧、集、已知进度及脱敏错误。
+
+初始片源只接受 HTTPS 的 `*.qznovelvod.com`。已验证的调度源为 `v<数字>-reading-video` 与 `v<数字>-ex-reading-video`，两者均允许无后缀、单字母后缀、`cdn` 或 `cdn302`。外部 CDN 仅接受当前请求的原始调度源委派。委派目标为单个 40–63 位字母数字节点下的 `vegslb.com` 或 `bdcgslb.com`，以及单个 40–63 位十六进制节点下的 `v.smtcdns.com`。编号、已支持的后缀和节点标识变化不需要逐个登记。未知调度源、未知 CDN 域或不符合格式的节点继续拒绝。直连和代理共用校验，均绑定不可变的初始来源，逐跳保留 HTTPS 证书、443 端口、无用户信息、无片段及跳数限制。媒体请求保留 Range 和响应尺寸校验，不附账号凭据。
+
+遇到新跳转拒绝时，从宿主脱敏日志提取同一事件的来源、目标和跳数，并与历史记录去重。新增经过核实的调度源或 CDN 类型时，回归同时覆盖所有已知拒绝链路、合法命名变化和未知目标拒绝，直连和代理均需验证。原失败剧集的实际播放须单独验证，取得不同 CDN 节点时如实记录。
 
 `app_playback_empty_response`只表示播放模型阶段HTTP200但正文为空，此时尚无浏览器资源，不能靠更换解码器解决。目录成功、手机可播或网站已登录均不能证明桌面App取源权限；网络、身份和请求兼容原因需日志证据，不猜测为账号拒绝。偶发真实网络问题的当前结论与下一步只在TASKS维护。
 

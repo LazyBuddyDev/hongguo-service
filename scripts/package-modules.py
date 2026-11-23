@@ -15,6 +15,13 @@ from toolchain_paths import GO, PYTHON, WHEELS, GSTREAMER
 
 ROOT=Path(__file__).resolve().parents[1]
 
+def build_helpers(profile):
+    cmd=['cargo','build','--locked','--manifest-path',str(ROOT/'search/Cargo.toml'),
+         '--target-dir',str(ROOT/'search/target')]
+    if profile=='release':cmd.append('--release')
+    subprocess.run(cmd,cwd=ROOT,check=True)
+    subprocess.run(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',
+                    str(ROOT/'scripts/build-hongguo-resolver.ps1')],cwd=ROOT,check=True)
 
 def copy_files(source,destination,pattern):
     destination.mkdir(parents=True,exist_ok=True)
@@ -81,10 +88,13 @@ def main():
     args=parser.parse_args()
     output=args.output.resolve()
     if not output.is_relative_to(ROOT/'target') or output.exists():raise ValueError('new output directory inside target required')
+    identifiers=args.modules.split(',')
+    if any(identifier not in ('hongguo','python-runtime','media-runtime') for identifier in identifiers):
+        raise ValueError('unknown module')
+    if 'hongguo' in identifiers:build_helpers(args.profile)
     output.mkdir(parents=True)
     catalog=[]
-    for identifier in args.modules.split(','):
-        if identifier not in ('hongguo','python-runtime','media-runtime'):raise ValueError('unknown module')
+    for identifier in identifiers:
         directory=output/identifier
         manifest=stage(identifier,directory,args.profile)
         archive=output/f'{identifier}-{manifest["version"]}-windows-x86_64.zip'

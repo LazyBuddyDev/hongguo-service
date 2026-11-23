@@ -18,9 +18,9 @@ class Tests(unittest.TestCase):
         for scope in ('../website','A','x\n','x'*49):
             with self.assertRaises(ValueError):c.prefix(scope)
     def test_scoped_preview_writes_only_its_own_device_cache(self):
-        with patch.object(c,'PREFIX',c.prefix('shell-preview')),patch.dict(c.os.environ,LAZYBUDDY_INSTANCE='shell-preview'),patch.object(c,'_read',return_value=None),patch.object(c,'_write') as write:
+        with patch.object(c,'PREFIX',c.prefix('isolated-fixture')),patch.dict(c.os.environ,LAZYBUDDY_INSTANCE='isolated-fixture'),patch.object(c,'_read',return_value=None),patch.object(c,'_write') as write:
             self.assertTrue(c.remember_device('123',PROFILE))
-            self.assertTrue(write.call_args.args[0].startswith(c.prefix('shell-preview')+'/device/'))
+            self.assertTrue(write.call_args.args[0].startswith(c.prefix('isolated-fixture')+'/device/'))
     def setUp(self):
         saved = patch.object(c, 'read', return_value=dict(v=1, uid='123', cookies={'sessionid':'fixture'}))
         saved.start();self.addCleanup(saved.stop)
@@ -77,7 +77,35 @@ class Tests(unittest.TestCase):
     def test_logout_deletes_only_current_account_device_and_website(self):
         with patch.object(c, 'read', return_value={'uid':'123'}), patch.object(c, '_delete') as delete:
             c.delete()
-            self.assertEqual([v.args[0] for v in delete.call_args_list], [c.device_target('123'), c.TARGET])
+            self.assertEqual([v.args[0] for v in delete.call_args_list], [c.TARGET, c.device_target('123')])
+
+    def test_corrupt_session_can_be_removed_without_guessing_device(self):
+        with patch.object(c,'read',side_effect=ValueError('invalid_saved_session')),patch.object(c,'_delete') as delete:
+            c.delete()
+            delete.assert_called_once_with(c.TARGET)
+
+    def test_isolated_missing_or_production_scope_refuses_credential_operations(self):
+        for scope in ('','shell-preview'):
+            with patch.dict(c.os.environ,LAZYBUDDY_INSTANCE='qa-audit'),patch.object(c,'PREFIX',c.prefix(scope)),patch.object(c,'_delete') as delete:
+                with self.assertRaisesRegex(ValueError,'invalid_credential_scope'):c.delete()
+                with self.assertRaisesRegex(ValueError,'invalid_credential_scope'):c.read_device('123')
+                delete.assert_not_called()
+
+    def test_catalog_refresh_preserves_device_and_error_codes(self):
+        import json
+        from unittest.mock import Mock
+        from lazybuddy_hongguo.backend import app_input as media
+        from lazybuddy_hongguo.errors import code
+        passport=Mock();passport.restore.return_value.confirm.return_value='123'
+        result=Mock(returncode=1,stdout=b'{"ok":false,"error":"unsupported_wrapped_material"}')
+        base=dict(owner='123',profile=PROFILE,series='12345',catalog_at=1000.,catalog=[dict(number=2,playable=True,id='101')])
+        with patch.object(c,'remember_device'),patch.object(media.pathlib.Path,'is_file',return_value=True),patch.object(media.subprocess,'run',return_value=result) as run:
+            for episode,now,expected in ((2,1050.,base['catalog']),(3,1050.,[]),(2,1121.,[])):
+                with patch.object(media.time,'monotonic',return_value=now),self.assertRaises(ValueError) as failure:
+                    media.resolve('12345',episode,'720p',base,passport)
+                self.assertEqual(code(failure.exception),'unsupported_wrapped_material')
+                request=json.loads(run.call_args.kwargs['input'])
+                self.assertEqual(request['catalog'],expected);self.assertEqual(request['profile'],PROFILE)
 
     def test_existing_website_save_guard_remains(self):
         record=dict(v=1, uid='123', cookies={'sessionid':'fixture'})

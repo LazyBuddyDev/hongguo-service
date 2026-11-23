@@ -24,13 +24,21 @@ def valid_url(value):
         return False
 
 
-def _download(url):
+def _download(url,cancelled=None):
+    limit=4*1024*1024
+    deadline=time.monotonic()+10
     with urllib.request.build_opener(NoRedirect()).open(url,timeout=5) as response:
         if response.status!=200:raise ValueError('cover_unavailable')
-        data=response.read(4*1024*1024+1)
-    if len(data)>4*1024*1024:raise ValueError('cover_size')
+        data=bytearray()
+        while len(data)<=limit:
+            if cancelled is not None and cancelled.is_set():raise ValueError('work_cancelled')
+            if time.monotonic()>=deadline:raise ValueError('cover_unavailable')
+            chunk=response.read1(min(64*1024,limit+1-len(data)))
+            if not chunk:break
+            data.extend(chunk)
+    if len(data)>limit:raise ValueError('cover_size')
     result=run([sys.executable,'-I','-B',str(Path(__file__).resolve().parent/'backend/cover.py')],
-        input=data,timeout=8,memory_limit=384*1024*1024)
+        input=data,timeout=8,memory_limit=384*1024*1024,cancelled=cancelled)
     if result.returncode or not 8<len(result.stdout)<=8+240*360*4:raise ValueError('cover_decode_failed')
     width,height=struct.unpack('>II',result.stdout[:8])
     if not 0<width<=240 or not 0<height<=360 or len(result.stdout)!=8+width*height*4:raise ValueError('cover_decode_failed')
@@ -70,14 +78,16 @@ def read_cached(series):
     return _cached(root/('cover-'+key+'.rgba') if root else None)
 
 
-def read(url,series=None):
+def read(url,series=None,cancelled=None):
     if not valid_url(url):raise ValueError('invalid_cover')
     root=_root()
     key=_series_key(series) if series is not None else hashlib.sha256(url.encode()).hexdigest()
     path=root/('cover-'+key+'.rgba') if root else None
     try:return _cached(path)
     except ValueError:pass
-    result=_download(url)
+    if cancelled is not None and cancelled.is_set():raise ValueError('work_cancelled')
+    result=_download(url,cancelled) if cancelled is not None else _download(url)
+    if cancelled is not None and cancelled.is_set():raise ValueError('work_cancelled')
     if path:
         temporary=None
         try:
@@ -86,7 +96,7 @@ def read(url,series=None):
             data=struct.pack('>II',result['width'],result['height'])+base64.b64decode(result['rgba'],validate=True)
             _pixels(data)
             with acquire(root/'cache.lock',wait=.2) as locked:
-                if locked:
+                if locked and (cancelled is None or not cancelled.is_set()):
                     with tempfile.NamedTemporaryFile(dir=root,prefix='cover-write-',delete=False) as output:
                         temporary=Path(output.name);output.write(data)
                     os.replace(temporary,path);temporary=None
