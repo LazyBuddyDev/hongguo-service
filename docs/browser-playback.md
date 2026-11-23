@@ -39,7 +39,7 @@ suspend、close、账号切换及页面释放取消候选及其进程树；恢�
 
 URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不能持久化、输出到公开状态或日志。只允许open明确传入的Origin、精确Host及固定路径。浏览器使用CORS模式，例如`<video crossorigin="anonymous">`。
 
-支持GET、HEAD、单Range与OPTIONS；服务私有POST控制不能由携带浏览器Origin/Sec-Fetch的请求调用。资源只能读取当前固定媒体，不提供任意URL代理。上游签名、Cookie、密钥与明文媒体不落盘；资源读取、响应、缓存及尺寸均受界限约束。
+支持GET、HEAD、单Range与OPTIONS；服务私有POST控制不能由携带浏览器Origin/Sec-Fetch的请求调用。资源只能读取当前固定媒体，不提供任意URL代理。上游签名、Cookie、密钥与明文媒体不落盘、不进入命令行；资源读取、响应、缓存及尺寸均受界限约束。
 
 每个资源最多12个连接处理线程，其中最多4个可同时读取媒体。暂停、恢复和关闭在同一锁内更新读取状态与代数。
 
@@ -47,7 +47,7 @@ URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不�
 
 隐藏时先暂停并卸载浏览器src，再suspend资源读取。已有上游读取最多等现有有界超时，取消代数下不得填新缓存或派生后续读取。恢复同一资源和实际位置但保持暂停，用户明确播放才继续。
 
-切根页面、打开设置或退出时close所属会话与进程树。session跨进程启动随机化，checkpoint、close、suspend和resume核对代数；旧页面不能关闭新播放器或覆盖其进度。相同最终检查点不重复提交云端。生命周期动作保留用户倍速、音量与静音。
+取源及辅助进程归所属 Windows Job，独立服务运行也须回收自身进程树。切根页面、打开设置或退出时 close 所属会话。session跨进程启动随机化，checkpoint、close、suspend和resume核对代数；旧页面不能关闭新播放器或覆盖其进度。相同最终检查点不重复提交云端。生命周期动作保留用户倍速、音量与静音。
 
 `LAZYBUDDY_CREDENTIAL_SCOPE`隔离Windows凭据和设备目标，允许1–48个小写字母、数字或连字符。`LAZYBUDDY_INSTANCE`为`default`或未设置时可使用默认凭据空间，也可由宿主指定其既有的`shell-preview`。其他实例必须显式指定独立scope，并使用独立数据目录。
 
@@ -57,7 +57,7 @@ URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不�
 
 服务启动时将所选http/https/all/no代理设置转给自身辅助进程，使Go与Python路由一致，保留显式环境覆盖。宿主「是否直连」清除本服务代理并设置`NO_PROXY=*`，关闭后重建服务跟随系统/环境设置；不修改机器或Clash配置，也不能据此声称绕过TUN路由。
 
-取源前检查已验证端点，CDN逐跳校验HTTPS及允许来源，不附账号Cookie或网页Referer。错误细分为`media_redirect_https_required`、`media_redirect_target_rejected`、`media_redirect_missing_location`、`media_redirect_limit`；旧`media_redirect_rejected`仍可显示。不能为偶发故障无条件放宽来源、增加自动重试或更换身份。手动重试由当前用户明确发起，保留当前剧与集的错误上下文。
+取源前检查已验证端点，CDN逐跳校验HTTPS及允许来源，不附账号Cookie或网页Referer。错误细分为`media_redirect_https_required`、`media_redirect_target_rejected`、`media_redirect_missing_location`、`media_redirect_limit`；旧`media_redirect_rejected`仍可显示。不能为偶发故障无条件放宽来源、增加自动重试或更换身份。401 或 403 后结束失败来源。手动重试由用户明确发起，保留当前剧、集、已知进度及脱敏错误。
 
 初始片源只接受 HTTPS 的 `*.qznovelvod.com`。已验证的调度源为 `v<数字>-reading-video` 与 `v<数字>-ex-reading-video`，两者均允许无后缀、单字母后缀、`cdn` 或 `cdn302`。外部 CDN 仅接受当前请求的原始调度源委派。委派目标为单个 40–63 位字母数字节点下的 `vegslb.com` 或 `bdcgslb.com`，以及单个 40–63 位十六进制节点下的 `v.smtcdns.com`。编号、已支持的后缀和节点标识变化不需要逐个登记。未知调度源、未知 CDN 域或不符合格式的节点继续拒绝。直连和代理共用校验，均绑定不可变的初始来源，逐跳保留 HTTPS 证书、443 端口、无用户信息、无片段及跳数限制。媒体请求保留 Range 和响应尺寸校验，不附账号凭据。
 

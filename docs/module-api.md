@@ -27,21 +27,25 @@ stdin每行一个UTF-8请求，如`{"version":1,"id":"h1","method":"health","arg
 
 ## 登录与事务
 
-`qr_png`是Base64 PNG，不在二维码阶段时为空。状态包括`idle`、`preparing`、`pending`、`scanned`、`verifying`、`signed_in`、`failed`、`cancelled`。只有身份验证和安全保存均完成才显示已登录；cancel停止本次扫码，logout才删除本应用保存的身份。原始账号标识、设备档案、Cookie、Token、签名地址和密钥不公开。
+`qr_png`是Base64 PNG，不在二维码阶段时为空。状态包括`idle`、`preparing`、`pending`、`scanned`、`verifying`、`signed_in`、`failed`、`cancelled`。桌面宿主在所属二维码弹层展示首次扫码。只有身份验证和安全保存均完成才显示已登录；cancel停止本次扫码，logout才删除本应用保存的身份。设备档案、收藏和观看历史按账号隔离。账号切换时清空旧展示，按请求代数丢弃旧结果。原始账号标识、设备档案、Cookie、Token、签名地址和密钥不公开。
 
-耗时收藏读写及进度同步返回`operation: "pending"`与`operation_method`，客户端通过`account.status`接收完成结果。期间`progress.read`仍可读取本地状态，其余账号操作可能返回`account_busy`。收藏响应声明还有分页或数量不全时，保留上次完整列表并报告失败。收藏乐观反馈与官方确认列表分离，失败或取消时恢复反馈。已提交事务离开后可能仍完成。
+耗时收藏读写及进度同步返回`operation: "pending"`与`operation_method`，客户端通过`account.status`接收完成结果。期间`progress.read`仍可读取本地状态，其余账号操作可能返回`account_busy`。媒体暂停等低延迟控制仍应可用。已提交事务离开后只完成必要核对，返回后按需只读确认。
 
-扫码只在可见二维码视图轮询，离开停止；非当前页面不能续期账号、同步收藏或预加载。关闭服务等待已提交事务收尾，不中断为未完成的事务保存。凭据仅使用Windows安全存储；独立验证使用独立数据目录和`LAZYBUDDY_CREDENTIAL_SCOPE`，规则见[浏览器播放](browser-playback.md)。
+扫码只在可见二维码视图轮询，离开停止；非当前页面不能续期账号、同步收藏或预加载。服务关闭按前述收尾预算处理已提交事务。凭据仅使用Windows安全存储；独立验证使用独立数据目录和`LAZYBUDDY_CREDENTIAL_SCOPE`，规则见[浏览器播放](browser-playback.md)。
+
+## 官方收藏
+
+收藏以官方账号为准。响应结构异常、声明还有分页或数量不全时报告失败，保留同账号上次确认的完整列表。添加、删除及官方读回分别验证。界面星标的乐观反馈与确认列表分离，失败或取消时恢复反馈。写入未确认期间禁止重复提交或自动补发，其他写入权限不能代替收藏权限。
 
 ## 观看进度
 
-历史按字符串剧ID索引，包含`episode`、秒数`time`与Unix秒`updated`。恢复账号读取本地快照，可见客户端再显式同步云端；合并按更新时间，包括较新的回退，不按最大集号或位置。播放/加载期间主动云同步可能返回`player_busy`。
+历史按账号原子保存，以字符串剧 ID 为索引，包含`episode`、秒数`time`与Unix秒`updated`。恢复账号读取本地快照，可见客户端按需显式同步云端。开始播放直接使用已有快照。云端合并按更新时间，包括较新的回退，不按最大集号或位置。播放/加载期间主动云同步可能返回`player_busy`。
 
-仅真实观看帧形成检查点，播放中保存本地，最终动作使用已提交的检查点收尾。回读必须匹配分集资源ID、集号、位置及服务端精度下的时间戳才确认上传。历史最大1 MiB，超限时优先移除最早的已确认或旧版记录，保留待上传项。测试使用独立凭据空间及合成响应。
+检查点只使用真实帧位置和已验证的分集标识。播放中保存本地，暂停、隐藏或离开时使用已提交的最终检查点收尾，无变化时不重复提交。旧上传不能把较新的断点标为已同步，云端读取失败或不完整时保留本地文件。回读必须匹配分集资源ID、集号、位置及服务端精度下的时间戳才确认上传。历史最大1 MiB，超限时优先移除最早的已确认或旧版记录，保留待上传项。测试使用独立凭据空间及合成响应。真实验证分别确认账号、媒体目录、单集权限、收藏及进度同步。
 
 ## 媒体
 
-Web消费者使用[浏览器播放资源API](browser-playback.md)：`playback.open/status/report_error/suspend/resume/checkpoint/close`。健康能力`browser_resources`和`credential_scopes`表明对应协议可用，不等于某部剧有权播放或已经成功解码。
+Web消费者使用[浏览器播放资源API](browser-playback.md)：`playback.open/status/prefetch/report_error/suspend/resume/checkpoint/close`。健康能力`browser_resources`和`credential_scopes`表明对应协议可用，不等于某部剧有权播放或已经成功解码。
 
 独立服务仍保留可选`media.*`原生解码能力，见[可选原生媒体运行时](media-runtime.md)；当前Web宿主不使用，默认包不依赖该运行时。不要混合两条呈现路径的验收结果。
 
