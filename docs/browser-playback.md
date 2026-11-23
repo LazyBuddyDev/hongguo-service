@@ -23,7 +23,7 @@
 
 URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不能持久化、输出到公开状态或日志。只允许open明确传入的Origin、精确Host及固定路径。浏览器使用CORS模式，例如`<video crossorigin="anonymous">`。
 
-支持GET、HEAD、单Range与OPTIONS；服务私有POST控制不能由携带浏览器Origin/Sec-Fetch的请求调用。资源只能读取当前固定媒体，不提供任意URL代理。上游签名、Cookie、密钥与明文媒体不落盘；资源读取、响应、缓存及尺寸均受界限约束。
+支持GET、HEAD、单Range与OPTIONS；服务私有POST控制不能由携带浏览器Origin/Sec-Fetch的请求调用。资源只能读取当前固定媒体，不提供任意URL代理。上游签名、Cookie、密钥与明文媒体不落盘、不进入命令行；资源读取、响应、缓存及尺寸均受界限约束。
 
 ## 生命周期与进度
 
@@ -37,7 +37,7 @@ URL为127.0.0.1上的随机短期会话能力，不是上游签名地址，不�
 
 服务启动时将所选http/https/all/no代理设置转给自身辅助进程，使Go与Python路由一致，保留显式环境覆盖。宿主「是否直连」清除本服务代理并设置`NO_PROXY=*`，关闭后重建服务跟随系统/环境设置；不修改机器或Clash配置，也不能据此声称绕过TUN路由。
 
-取源前检查已验证端点，CDN逐跳校验HTTPS及允许来源，不附账号Cookie或网页Referer。错误细分为`media_redirect_https_required`、`media_redirect_target_rejected`、`media_redirect_missing_location`、`media_redirect_limit`；旧`media_redirect_rejected`仍可显示。不能为偶发故障放宽来源、增加自动重试或更换身份。手动重试由当前用户明确发起，保留当前剧与集的错误上下文。
+取源及辅助进程归所属 Windows Job，独立运行也须在退出时回收进程树。取源前检查已验证端点，CDN 逐跳校验 HTTPS 及允许来源，不附账号 Cookie 或网页 Referer。401 或 403 后停止该来源。错误细分为`media_redirect_https_required`、`media_redirect_target_rejected`、`media_redirect_missing_location`、`media_redirect_limit`；旧`media_redirect_rejected`仍可显示。不能为偶发故障放宽来源、增加自动重试或更换身份。手动重试由当前用户明确发起，保留当前剧名、集数、已知位置及脱敏错误类别。
 
 `app_playback_empty_response`只表示播放模型阶段HTTP200但正文为空，此时尚无浏览器资源，不能靠更换解码器解决。目录成功、手机可播或网站已登录均不能证明桌面App取源权限；网络、身份和请求兼容原因需日志证据，不猜测为账号拒绝。偶发真实网络问题的当前结论与下一步只在TASKS维护。
 
