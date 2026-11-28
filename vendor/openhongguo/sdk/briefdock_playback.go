@@ -2,6 +2,8 @@ package sdk
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/beilunyang/openhongguo/internal/protocol"
@@ -9,7 +11,7 @@ import (
 	"github.com/beilunyang/openhongguo/sdk/model"
 )
 
-// BriefDockPlayback uses one current player RPC with the existing device only.
+// BriefDockPlayback uses one body-signed POST with the existing device only.
 func (c *Client) BriefDockPlayback(ctx context.Context, episodeID, quality string) (*model.Playback, error) {
 	if !validID(episodeID) {
 		return nil, fmt.Errorf("invalid episode ID")
@@ -18,20 +20,21 @@ func (c *Client) BriefDockPlayback(ctx context.Context, episodeID, quality strin
 	if err != nil {
 		return nil, err
 	}
-	pairs := append(protocol.DeviceQueryPairs(c.identity(p)),
-		[2]string{"video_id", episodeID}, [2]string{"video_id_type", "0"}, [2]string{"device_level", "1"},
-		[2]string{"need_all_video_definition", "1"}, [2]string{"need_mp4_align", "0"},
-		[2]string{"use_os_player", "0"}, [2]string{"video_platform", "1024"}, [2]string{"source", "0"}, [2]string{"from_video_id", ""})
-	query, headers, err := sign.SignPlayerGET(pairs, c.clock().UnixMilli())
+	pairs := protocol.DeviceQueryPairs(c.identity(p))
+	body, err := protocol.PlaybackBody(episodeID)
 	if err != nil {
 		return nil, err
 	}
+	query, headers := sign.SignPlaybackPOST("/novel/player/video_model/v1/", pairs, c.clock().UnixMilli(), p.DeviceID, protocol.VersionName, body, nil)
 	d := c.deviceOf(p)
 	headers["User-Agent"] = fmt.Sprintf("%s/%s (Linux; U; Android %s; zh_CN; %s; Build/%s;tt-ok/3.12.13.20)", protocol.Package, protocol.VersionCode, d.OSVersion, d.Model, d.Build)
 	if p.TTReq != "" {
 		headers["Cookie"] = guestCookie(p)
 	}
-	raw, _, err := c.doRaw(ctx, "GET", "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/?"+query, headers, nil)
+	digest := md5.Sum(body)
+	headers["x-ss-stub"] = hex.EncodeToString(digest[:])
+	headers["Content-Type"] = "application/json; charset=utf-8"
+	raw, _, err := c.doRaw(ctx, "POST", "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/video_model/v1/?"+query, headers, body)
 	if err != nil {
 		return nil, err
 	}
@@ -50,16 +53,26 @@ func playerResponseModel(raw []byte, episodeID string) (json.RawMessage, error) 
 		return nil, fmt.Errorf("invalid playback response")
 	}
 	rows := env.Data
-	if nested, ok := rows["video_model_data"]; ok {
-		if json.Unmarshal(nested, &rows) != nil {
-			return nil, fmt.Errorf("invalid playback response")
-		}
-	}
 	var row struct {
 		VideoModel json.RawMessage `json:"video_model"`
 	}
-	if json.Unmarshal(rows[episodeID], &row) != nil || len(row.VideoModel) == 0 {
-		return nil, fmt.Errorf("playback_episode_mismatch")
+	if direct, ok := rows["video_model"]; ok {
+		if supplied, ok := rows["video_id"]; ok {
+			var returned string
+			if json.Unmarshal(supplied, &returned) != nil || returned != episodeID {
+				return nil, fmt.Errorf("playback_episode_mismatch")
+			}
+		}
+		row.VideoModel = direct
+	} else {
+		if nested, ok := rows["video_model_data"]; ok {
+			if json.Unmarshal(nested, &rows) != nil {
+				return nil, fmt.Errorf("invalid playback response")
+			}
+		}
+		if json.Unmarshal(rows[episodeID], &row) != nil || len(row.VideoModel) == 0 {
+			return nil, fmt.Errorf("playback_episode_mismatch")
+		}
 	}
 	if len(row.VideoModel) > 0 && row.VideoModel[0] == '"' {
 		var text string

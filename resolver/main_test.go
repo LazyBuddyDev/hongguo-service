@@ -2,14 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"github.com/beilunyang/openhongguo/adapters/memstore"
 	"github.com/beilunyang/openhongguo/sdk"
 	"github.com/beilunyang/openhongguo/sdk/model"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -68,44 +69,50 @@ func TestDanmakuRouteDoesNotReceiveAccountCookies(t *testing.T) {
 }
 
 func TestPlayerRequestUsesSameDeviceAndExactEpisode(t *testing.T) {
-	for _, matching := range []bool{true, false} {
+	for _, shape := range []string{"matching", "mismatched", "no_outer_id"} {
+		matching := shape != "mismatched"
 		store := memstore.New()
 		store.Save(context.Background(), &sdk.DeviceProfile{DeviceID: "12345", InstallID: "12346", TTReq: "fixture"})
 		hits := 0
 		wire := &transport{cookies: map[string]string{"sessionid": "fixture"}, client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
 			hits++
+			if r.Method != "POST" || r.URL.Host != "api5-normal-sinfonlinea.fqnovel.com" || r.URL.Path != "/novel/player/video_model/v1/" {
+				t.Fatal("wrong playback contract")
+			}
 			q := r.URL.Query()
-			if r.Method != "GET" || r.URL.Host != "api5-normal-sinfonlineb.fqnovel.com" || r.URL.Path != "/reading/bookapi/video_tab/multi_video_model/v1/" || q.Get("video_id") != "12347" || q.Get("device_id") != "12345" || q.Get("iid") != "12346" || q.Get("video_platform") != "1024" || q.Get("ts") != "" {
-				t.Fatal("request changed device, episode or route")
+			if q.Get("device_id") != "12345" || q.Get("iid") != "12346" || q.Get("video_id") != "" {
+				t.Fatal("changed device or leaked business query")
 			}
-
-			expected := map[string]string{"video_id_type": "0", "device_level": "1", "need_all_video_definition": "1", "need_mp4_align": "0", "use_os_player": "0", "video_platform": "1024", "source": "0", "from_video_id": "", "version_code": "73932", "version_name": "7.3.9.32"}
-			for key, value := range expected {
-				if q.Get(key) != value || len(q[key]) != 1 {
-					t.Fatal("player business fields differ from pinned reference")
-				}
+			raw, _ := io.ReadAll(r.Body)
+			digest := md5.Sum(raw)
+			if r.Header.Get("X-SS-STUB") != hex.EncodeToString(digest[:]) || r.Header.Get("X-Medusa") == "" {
+				t.Fatal("missing Medusa or body digest mismatch")
 			}
-			ticket, err := strconv.ParseInt(q.Get("_rticket"), 10, 64)
-			if err != nil || r.Header.Get("x-ss-req-ticket") != q.Get("_rticket") || r.Header.Get("x-khronos") != strconv.FormatInt(ticket/1000, 10) {
-				t.Fatal("query and signature clocks differ")
+			var payload map[string]any
+			if json.Unmarshal(raw, &payload) != nil || payload["video_id"] != "12347" {
+				t.Fatal("wrong requested episode")
 			}
-			for _, key := range []string{"x-gorgon", "x-helios", "x-medusa", "x-tt-dt"} {
-				if r.Header.Get(key) != "" {
-					t.Fatal("mixed legacy signatures")
-				}
+			biz, ok := payload["biz_param"].(map[string]any)
+			if !ok || biz["video_platform"] != float64(3) || biz["need_all_video_definition"] != true || biz["video_id_type"] != float64(0) {
+				t.Fatal("wrong playback body")
 			}
-			if len(r.Header.Get("x-argus")) < 100 || len(r.Header.Get("x-ladon")) < 40 {
-				t.Fatal("missing full signatures")
+			if r.Header.Get("Content-Encoding") != "" || r.Header.Get("Content-Type") != "application/json; charset=utf-8" || r.Header.Get("X-SS-STUB") == "" {
+				t.Fatal("wrong body transport")
 			}
 			if _, err := r.Cookie("sessionid"); err != nil {
 				t.Fatal("missing account context")
 			}
-			model := map[string]any{"video_id": "fixture", "video_duration": 30, "video_list": []any{map[string]any{"main_url": base64.StdEncoding.EncodeToString([]byte("https://fixture.qznovelvod.com/a.mp4")), "definition": "720p", "vwidth": 1280, "vheight": 720}}}
 			key := "12347"
 			if !matching {
 				key = "12348"
 			}
-			body, _ := json.Marshal(map[string]any{"code": 0, "data": map[string]any{"video_model_data": map[string]any{key: map[string]any{"video_model": model}}}})
+			model := map[string]any{"video_id": "fixture", "video_duration": 30, "video_list": []any{map[string]any{"main_url": base64.StdEncoding.EncodeToString([]byte("https://fixture.qznovelvod.com/a.mp4")), "definition": "720p", "vwidth": 1280, "vheight": 720}}}
+			encodedModel, _ := json.Marshal(model)
+			data := map[string]any{"video_id": key, "video_model": string(encodedModel)}
+			if shape == "no_outer_id" {
+				delete(data, "video_id")
+			}
+			body, _ := json.Marshal(map[string]any{"code": 0, "data": data})
 			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
 		})}}
 		client, err := sdk.NewClient(sdk.Options{Transport: wire, ProfileStore: store, RetryAttempts: 1, DeviceResets: sdk.Int(0)})
@@ -121,9 +128,6 @@ func TestPlayerRequestUsesSameDeviceAndExactEpisode(t *testing.T) {
 		}
 		if hits != 1 {
 			t.Fatal("registered or retried")
-		}
-		if _, err := wire.Do(context.Background(), &sdk.Request{Method: "POST", URL: "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/"}); err == nil {
-			t.Fatal("unexpected player write")
 		}
 	}
 }

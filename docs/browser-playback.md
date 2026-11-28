@@ -87,8 +87,12 @@ python -B scripts/verify/stage-browser-fixture.py --runtime-packages target/pack
 
 0.2.10的取源失败诊断在`response_meta`中仅保留白名单：HTTP版本枚举、Content-Type类别（去参数）、Content-Encoding类别、声明长度、Go自动解压布尔值、Transfer-Encoding类别、服务端Date与本机的秒差，以及请求ID/Location头是否存在的布尔值。未知文本只记other，不记录任意响应头原文、Set-Cookie、请求ID值、Location地址或响应正文。Python诊断构造端再次校验枚举、数值范围和类型。自动解压时Go可能移除原Content-Length/Content-Encoding，需结合uncompressed解释，不能将读取后的字节数冒充原始线路字节数。
 
-请求核对使用vendor/openhongguo/BRIEFDOCK.md所列固定版本第三方参考（不是官方API规范）：GET路径、业务字段、应用版本73932，以及query的_rticket与签名头时间同源。当前未确认服务端实时验签/放行要求。未引入参考中的身份轮换、跨主机回退或自动重试。发现SDK空CSRF占位与账号Cookie直接追加会重名，现按Cookie名称合并，账号值覆盖同名占位，保留现有设备的install_id/ttreq；这修复了请求构造风险，但尚无真实请求证据证明它是原200空体的根因。
+0.2.21及更早实现的请求核对使用vendor/openhongguo/BRIEFDOCK.md所列固定版本第三方参考（不是官方API规范）：GET路径、业务字段、应用版本73932，以及query的_rticket与签名头时间同源。当前未确认服务端实时验签/放行要求。未引入参考中的身份轮换、跨主机回退或自动重试。发现SDK空CSRF占位与账号Cookie直接追加会重名，现按Cookie名称合并，账号值覆盖同名占位，保留现有设备的install_id/ttreq；这修复了请求构造风险，但尚无真实请求证据证明它是原200空体的根因。
 
 SDK 二次开发在 [LazyBuddyDev/openhongguo](https://github.com/LazyBuddyDev/openhongguo/tree/lazybuddy) 的 `lazybuddy` 分支维护。本服务通过 `vendor/openhongguo` 使用固定源码快照。迁移时的维护基线是 [475032c](https://github.com/LazyBuddyDev/openhongguo/commit/475032c98f0e8fd9f7b8aa4bc37c617c7231dc6f)。上游变更由 fork 的工作流提示，按实际影响审查并定向验证后再更新服务快照。
 
 收藏封面自0.2.13起按剧ID的哈希读取有界像素缓存，服务重建丢失来源表时仍可返回已缓存图片；未缓存或过期/损坏的图片且无已验证来源时返回cover_unavailable，不新增来源查询或自动刷新收藏。搜索封面沿用已有来源缓存，接口不暴露封面地址。
+
+### 0.2.22 播放请求契约
+
+固定单次 POST `/novel/player/video_model/v1/`，以原设备、原账号及现有本地 signer 签署实际 JSON 正文；保留 Medusa 和正文摘要，不增加端点回退、换身份或自动重试。旧 video_tab GET 的空响应与新 POST 的成功模型已在同一原账号设备上对照。直接模型可能没有独立分集 ID，此时以固定 RPC 的请求分集关联；明确返回的分集 ID 或分集键必须匹配。视频模型内的 VOD 标识不是分集 ID。历史 GET 说明仅适用于 0.2.21 及更早版本。

@@ -24,12 +24,17 @@ No collection replacement, bulk cancellation, arbitrary URL or automatic write r
 is accepted. Favorite state is read before the operation and read back afterward;
 isolated writes additionally require BRIEFDOCK_FAVORITES_REAL=1.
 
-Playback adds `sdk/briefdock_playback.go` and `internal/protocol/sign/briefdock_playback.go`:
-one fixed GET player-model endpoint, full Argus/Ladon using existing Apache SDK
-primitives, no account-style legacy signature headers, no endpoint/device rotation.
-Wire-field reference only (no copied implementation):
-https://github.com/tsukiyo-zero/hongguoTV/blob/77a99f509b8a5c586bf6ef453147cf1003203970/kotlin-tv/core/src/main/kotlin/com/hongguotv/core/ContentRepository.kt
-and `Signer.kt` / `Argus.kt` at the same commit.
+Playback uses `sdk/briefdock_playback.go`: one fixed POST
+`https://api5-normal-sinfonlinea.fqnovel.com/novel/player/video_model/v1/`,
+with the existing device, protocol.PlaybackBody JSON and its exact body digest.
+SignPlaybackPOST retains Medusa as in upstream PR #25; the managed native signer
+replaces the six signature headers using the exact outgoing URL/body.
+No endpoint fallback, automatic retry or device rotation is introduced.
+References: https://github.com/beilunyang/openhongguo/pull/25 and its linked
+reports of the retired video_tab GET route. Original GET helper is retired.
+A direct response may omit an independent episode ID; in that shape the model
+is associated with the requested ID by the fixed RPC. Explicit response IDs
+and keyed models are checked when present; the inner VOD ID is not an episode ID.
 
 `internal/protocol/parse.go` and `sdk/model/media.go` retain the upstream generic
 parser and add a quality-aware path: select supported AVC/HEVC renditions, prefer
@@ -40,4 +45,4 @@ benefit and removed; signed fallback addresses are not used. Focused tests cover
 wrong-episode rejection, mixed codecs/materials, higher-resolution selection and
 no silent downgrade.
 
-Reviewed fork snapshot update: `93f021224339e035418fbe3f13fee77426df8de4` (2026-11-28), based on upstream review through `cac5dbc0e1150c0f93e309d8de68bb483f50f499` (v0.4.1). Includes terminal control filtering, search suggestion `q`, person works tab/cursor compatibility and model comment updates. Playback, signing and authenticated shelf/progress adaptations remain unchanged. Review decisions: https://github.com/LazyBuddyDev/openhongguo/blob/93f021224339e035418fbe3f13fee77426df8de4/docs/upstream-review.md
+Reviewed fork snapshot update: `93f021224339e035418fbe3f13fee77426df8de4` (2026-11-28), based on upstream review through `cac5dbc0e1150c0f93e309d8de68bb483f50f499` (v0.4.1). Includes terminal control filtering, search suggestion `q`, person works tab/cursor compatibility and model comment updates. That snapshot-only update left playback, signing and authenticated shelf/progress adaptations unchanged; the subsequent 0.2.22 playback fix is documented above. Review decisions: https://github.com/LazyBuddyDev/openhongguo/blob/93f021224339e035418fbe3f13fee77426df8de4/docs/upstream-review.md
