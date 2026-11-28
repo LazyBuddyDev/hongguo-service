@@ -1,6 +1,6 @@
 # 本地签名运行时
 
-红果 0.2.20 精确依赖 `hongguo-signer` 0.1.0，沿用宿主的依赖下载、校验和原子激活协议。签名运行时包含 openhongguo-signer、依赖 JAR 和私有 Java 21 镜像；用户无需安装系统 Java 或 Docker。基础宿主无需此运行时。
+自红果 0.2.20 起精确依赖 `hongguo-signer` 0.1.0，沿用宿主的依赖下载、校验和原子激活协议。签名运行时包含 openhongguo-signer、依赖 JAR 和私有 Java 21 镜像；用户无需安装系统 Java 或 Docker。基础宿主无需此运行时。
 
 ## 调用与生命周期
 

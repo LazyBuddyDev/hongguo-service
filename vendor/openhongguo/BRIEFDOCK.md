@@ -39,3 +39,5 @@ being treated as HEVC. Extra compatibility-model requests were tested without
 benefit and removed; signed fallback addresses are not used. Focused tests cover
 wrong-episode rejection, mixed codecs/materials, higher-resolution selection and
 no silent downgrade.
+
+Reviewed fork snapshot update: `93f021224339e035418fbe3f13fee77426df8de4` (2026-11-28), based on upstream review through `cac5dbc0e1150c0f93e309d8de68bb483f50f499` (v0.4.1). Includes terminal control filtering, search suggestion `q`, person works tab/cursor compatibility and model comment updates. Playback, signing and authenticated shelf/progress adaptations remain unchanged. Review decisions: https://github.com/LazyBuddyDev/openhongguo/blob/93f021224339e035418fbe3f13fee77426df8de4/docs/upstream-review.md
